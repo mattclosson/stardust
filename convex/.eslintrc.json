@@ -1,0 +1,25 @@
+{
+  "root": true,
+  "env": {
+    "node": true,
+    "es2022": true
+  },
+  "parserOptions": {
+    "ecmaVersion": "latest",
+    "sourceType": "module"
+  },
+  "rules": {
+    "no-restricted-imports": [
+      "error",
+      {
+        "patterns": [
+          {
+            "group": ["./_generated/server"],
+            "importNames": ["mutation", "internalMutation"],
+            "message": "Import mutation/internalMutation from './aggregates' instead to ensure aggregates stay in sync."
+          }
+        ]
+      }
+    ]
+  }
+}
