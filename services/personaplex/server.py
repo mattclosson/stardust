@@ -281,9 +281,9 @@ async def create_session(request: CreateSessionRequest):
     session = session_manager.get_session(session_id)
     
     # Build WebSocket URL for PersonaPlex
-    # The client will connect to PersonaPlex directly for audio
+    # The client will connect through the wrapper's WebSocket proxy
     host = os.getenv("PUBLIC_HOST", "localhost")
-    ws_url = f"wss://{host}:{PERSONAPLEX_PORT}"
+    ws_url = f"ws://{host}:{CONTEXT_API_PORT}"
     
     return CreateSessionResponse(
         session_id=session_id,
@@ -339,12 +339,11 @@ async def websocket_proxy(websocket: WebSocket, session_id: str):
     
     # Connect to PersonaPlex
     host = os.getenv("PERSONAPLEX_HOST", "localhost")
-    personaplex_url = f"wss://{host}:{PERSONAPLEX_PORT}"
+    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}"
     
     try:
         async with websockets.connect(
             personaplex_url,
-            ssl=True,  # PersonaPlex uses self-signed SSL in dev
         ) as pp_ws:
             # Send initial configuration to PersonaPlex
             # Note: PersonaPlex uses voice and text prompts
