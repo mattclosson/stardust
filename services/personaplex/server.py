@@ -338,23 +338,16 @@ async def websocket_proxy(websocket: WebSocket, session_id: str):
     logger.info(f"Client connected to session {session_id[:8]}...")
     
     # Connect to PersonaPlex
-    # PersonaPlex WebSocket endpoint is at /api/chat
+    # PersonaPlex WebSocket endpoint is at /api/chat with voice_prompt query param
     host = os.getenv("PERSONAPLEX_HOST", "localhost")
-    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}/api/chat"
+    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}/api/chat?voice_prompt={VOICE_PROMPT}"
     logger.info(f"Connecting to PersonaPlex at {personaplex_url}")
     
     try:
         async with websockets.connect(
             personaplex_url,
         ) as pp_ws:
-            # Send initial configuration to PersonaPlex
-            # Note: PersonaPlex uses voice and text prompts
-            config = {
-                "type": "config",
-                "voice_prompt": VOICE_PROMPT,
-                "text_prompt": session.text_prompt,
-            }
-            await pp_ws.send(json.dumps(config))
+            logger.info(f"Connected to PersonaPlex for session {session_id[:8]}...")
             
             async def forward_to_personaplex():
                 """Forward messages from client to PersonaPlex."""
