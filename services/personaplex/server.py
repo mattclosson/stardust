@@ -338,8 +338,10 @@ async def websocket_proxy(websocket: WebSocket, session_id: str):
     logger.info(f"Client connected to session {session_id[:8]}...")
     
     # Connect to PersonaPlex
+    # PersonaPlex WebSocket endpoint is at /ws
     host = os.getenv("PERSONAPLEX_HOST", "localhost")
-    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}"
+    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}/ws"
+    logger.info(f"Connecting to PersonaPlex at {personaplex_url}")
     
     try:
         async with websockets.connect(
