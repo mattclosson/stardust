@@ -18,6 +18,7 @@ from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Optional
+from urllib.parse import urlencode
 
 import uvicorn
 from dotenv import load_dotenv
@@ -338,10 +339,14 @@ async def websocket_proxy(websocket: WebSocket, session_id: str):
     logger.info(f"Client connected to session {session_id[:8]}...")
     
     # Connect to PersonaPlex
-    # PersonaPlex WebSocket endpoint is at /api/chat with voice_prompt query param
+    # PersonaPlex WebSocket endpoint is at /api/chat with voice_prompt and text_prompt query params
     host = os.getenv("PERSONAPLEX_HOST", "localhost")
-    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}/api/chat?voice_prompt={VOICE_PROMPT}"
-    logger.info(f"Connecting to PersonaPlex at {personaplex_url}")
+    query_params = urlencode({
+        "voice_prompt": VOICE_PROMPT,
+        "text_prompt": session.text_prompt,
+    })
+    personaplex_url = f"ws://{host}:{PERSONAPLEX_PORT}/api/chat?{query_params}"
+    logger.info(f"Connecting to PersonaPlex at ws://{host}:{PERSONAPLEX_PORT}/api/chat")
     
     try:
         async with websockets.connect(
