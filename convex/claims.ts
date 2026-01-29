@@ -2,6 +2,7 @@ import { query, mutation } from "./_generated/server"
 import { paginationOptsValidator } from "convex/server"
 import { v } from "convex/values"
 import { claimsByOrg, claimsByStatus, getClaimStatsBatch } from "./aggregates"
+import { enrichClaimsWithPatientAndPayer } from "./utils/enrichment"
 
 // List claims with filtering and pagination
 export const list = query({
@@ -33,33 +34,8 @@ export const list = query({
 
     const paginatedClaims = await claimsQuery.paginate(args.paginationOpts)
 
-    // Enrich claims with patient and payer data
-    const enrichedPage = await Promise.all(
-      paginatedClaims.page.map(async (claim) => {
-        const patient = await ctx.db.get(claim.patientId)
-        const coverage = await ctx.db.get(claim.coverageId)
-        const payer = coverage ? await ctx.db.get(coverage.payerId) : null
-
-        return {
-          ...claim,
-          patient: patient
-            ? {
-                _id: patient._id,
-                firstName: patient.firstName,
-                lastName: patient.lastName,
-                mrn: patient.mrn,
-              }
-            : null,
-          payer: payer
-            ? {
-                _id: payer._id,
-                name: payer.name,
-                payerType: payer.payerType,
-              }
-            : null,
-        }
-      })
-    )
+    // Enrich claims with patient and payer data using shared utility
+    const enrichedPage = await enrichClaimsWithPatientAndPayer(ctx, paginatedClaims.page)
 
     return {
       ...paginatedClaims,
@@ -93,35 +69,8 @@ export const search = query({
 
     const claims = await searchQuery.take(limit)
 
-    // Enrich with patient and payer data
-    const enrichedClaims = await Promise.all(
-      claims.map(async (claim) => {
-        const patient = await ctx.db.get(claim.patientId)
-        const coverage = await ctx.db.get(claim.coverageId)
-        const payer = coverage ? await ctx.db.get(coverage.payerId) : null
-
-        return {
-          ...claim,
-          patient: patient
-            ? {
-                _id: patient._id,
-                firstName: patient.firstName,
-                lastName: patient.lastName,
-                mrn: patient.mrn,
-              }
-            : null,
-          payer: payer
-            ? {
-                _id: payer._id,
-                name: payer.name,
-                payerType: payer.payerType,
-              }
-            : null,
-        }
-      })
-    )
-
-    return enrichedClaims
+    // Enrich with patient and payer data using shared utility
+    return enrichClaimsWithPatientAndPayer(ctx, claims)
   },
 })
 
@@ -331,6 +280,55 @@ export const count = query({
       }
     }
     return total
+  },
+})
+
+// Get claim context for voice assistant
+// Returns formatted data suitable for PersonaPlex voice prompts
+export const getVoiceContext = query({
+  args: { claimId: v.id("claims") },
+  handler: async (ctx, args) => {
+    const claim = await ctx.db.get(args.claimId)
+    if (!claim) return null
+
+    const [patient, coverage, diagnoses, lineItems] = await Promise.all([
+      ctx.db.get(claim.patientId),
+      ctx.db.get(claim.coverageId),
+      ctx.db
+        .query("claimDiagnoses")
+        .withIndex("by_claim", (q) => q.eq("claimId", args.claimId))
+        .collect(),
+      ctx.db
+        .query("lineItems")
+        .withIndex("by_claim", (q) => q.eq("claimId", args.claimId))
+        .collect(),
+    ])
+
+    const payer = coverage ? await ctx.db.get(coverage.payerId) : null
+
+    return {
+      claimNumber: claim.claimNumber,
+      payerClaimNumber: claim.payerClaimNumber,
+      patientName: patient ? `${patient.firstName} ${patient.lastName}` : "Unknown",
+      patientMrn: patient?.mrn ?? "Unknown",
+      payerName: payer?.name ?? "Unknown",
+      memberId: coverage?.memberId ?? "Unknown",
+      groupNumber: coverage?.groupNumber,
+      dateOfService: claim.dateOfService,
+      dateOfServiceEnd: claim.dateOfServiceEnd,
+      totalCharges: claim.totalCharges,
+      totalAllowed: claim.totalAllowed,
+      totalPaid: claim.totalPaid,
+      totalAdjustments: claim.totalAdjustments,
+      totalPatientResponsibility: claim.totalPatientResponsibility,
+      status: claim.status,
+      priority: claim.priority,
+      priorAuthNumber: claim.priorAuthNumber,
+      diagnoses: diagnoses.map((d) => `${d.code}${d.description ? `: ${d.description}` : ""}`),
+      procedures: lineItems.map(
+        (l) => `${l.procedureCode}${l.description ? `: ${l.description}` : ""} (${l.units} units, $${l.chargeAmount})`
+      ),
+    }
   },
 })
 

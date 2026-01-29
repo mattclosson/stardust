@@ -1,7 +1,9 @@
 import { useState, useEffect } from "react"
-import { Loader2 } from "lucide-react"
+import { useQuery } from "convex/react"
+import { api } from "../../../convex/_generated/api"
+import type { Id } from "../../../convex/_generated/dataModel"
+import { Loader2, User } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -19,6 +21,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { logError } from "@/lib/logger"
+import { getRoleLabel } from "@/constants/roles"
 
 interface Task {
   _id: string
@@ -33,6 +36,7 @@ interface EditTaskDialogProps {
   open: boolean
   onOpenChange: (open: boolean) => void
   task: Task | null
+  organizationId?: Id<"organizations">
   onSave: (updates: {
     priority?: string
     status?: string
@@ -44,12 +48,19 @@ export function EditTaskDialog({
   open,
   onOpenChange,
   task,
+  organizationId,
   onSave,
 }: EditTaskDialogProps) {
   const [priority, setPriority] = useState("")
   const [status, setStatus] = useState("")
   const [assignedTo, setAssignedTo] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+
+  // Fetch team members for the organization
+  const teamMembers = useQuery(
+    api.team.listForOrganization,
+    organizationId ? { organizationId } : "skip"
+  )
 
   useEffect(() => {
     if (task) {
@@ -76,6 +87,19 @@ export function EditTaskDialog({
   }
 
   if (!task) return null
+
+  const isLoadingMembers = teamMembers === undefined && organizationId !== undefined
+
+  // Get display name for current assignee
+  const getDisplayName = (value: string) => {
+    const member = teamMembers?.find(
+      (m) => m.email === value || `${m.firstName} ${m.lastName}` === value
+    )
+    if (member) {
+      return `${member.firstName} ${member.lastName}`
+    }
+    return value || "Select team member"
+  }
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -119,12 +143,44 @@ export function EditTaskDialog({
 
           <div className="space-y-2">
             <Label htmlFor="assignedTo">Assigned To</Label>
-            <Input
-              id="assignedTo"
-              placeholder="Enter name or email"
-              value={assignedTo}
-              onChange={(e) => setAssignedTo(e.target.value)}
-            />
+            {isLoadingMembers ? (
+              <div className="flex items-center justify-center py-4">
+                <Loader2 className="w-5 h-5 animate-spin text-muted-foreground" />
+              </div>
+            ) : teamMembers && teamMembers.length > 0 ? (
+              <Select value={assignedTo} onValueChange={setAssignedTo}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select team member">
+                    {assignedTo ? getDisplayName(assignedTo) : "Select team member"}
+                  </SelectValue>
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">
+                    <span className="text-muted-foreground">Unassigned</span>
+                  </SelectItem>
+                  {teamMembers.map((member) => (
+                    <SelectItem
+                      key={member._id}
+                      value={member.email}
+                    >
+                      <div className="flex items-center gap-2">
+                        <User className="w-4 h-4 text-muted-foreground" />
+                        <span>
+                          {member.firstName} {member.lastName}
+                        </span>
+                        <span className="text-xs text-muted-foreground">
+                          ({getRoleLabel(member.role)})
+                        </span>
+                      </div>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                No team members available.
+              </p>
+            )}
           </div>
         </div>
         <DialogFooter>

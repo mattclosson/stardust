@@ -3,14 +3,14 @@ import express from "express";
 import cors from "cors";
 import { createServer } from "http";
 import { WebSocketServer, WebSocket } from "ws";
-import { twilioRouter } from "./routes/twilio.js";
+import { signalwireRouter } from "./routes/signalwire.js";
 import testIvrRouter from "./routes/test-ivr.js";
 import { CallManager } from "./services/callManager.js";
 
 const app = express();
 const server = createServer(app);
 
-// WebSocket server for Twilio media streams
+// WebSocket server for SignalWire media streams
 const wss = new WebSocketServer({ server, path: "/media-stream" });
 
 // Middleware
@@ -26,15 +26,15 @@ app.get("/health", (req, res) => {
   res.json({ status: "ok", timestamp: new Date().toISOString() });
 });
 
-// Twilio routes
-app.use("/twilio", twilioRouter);
+// SignalWire routes
+app.use("/signalwire", signalwireRouter);
 
 // Test IVR routes (for testing Hold-for-Me without real insurance calls)
 app.use("/test-ivr", testIvrRouter);
 
-// WebSocket connection handler for Twilio media streams
+// WebSocket connection handler for SignalWire media streams
 wss.on("connection", (ws: WebSocket, req) => {
-  console.log("[WebSocket] New connection from Twilio media stream");
+  console.log("[WebSocket] New connection from SignalWire media stream");
   
   let callSid: string | null = null;
   let streamSid: string | null = null;

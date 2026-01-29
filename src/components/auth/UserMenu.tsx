@@ -86,7 +86,7 @@ export function UserMenu() {
           </Link>
         </DropdownMenuItem>
         <DropdownMenuItem asChild>
-          <Link to="/" className="cursor-pointer">
+          <Link to="/settings/team" className="cursor-pointer">
             <Settings className="w-4 h-4 mr-2" />
             Settings
           </Link>

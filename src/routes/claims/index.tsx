@@ -442,6 +442,7 @@ function ClaimsListPage() {
         title="Assign Claim"
         description={`Assign claim ${selectedClaim?.claimNumber} to a team member.`}
         currentAssignee={selectedClaim?.assignedTo}
+        organizationId={orgId}
         onAssign={confirmAssign}
       />
 

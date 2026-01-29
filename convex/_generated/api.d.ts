@@ -40,9 +40,14 @@ import type * as dataGenerator_utils_randomUtils from "../dataGenerator/utils/ra
 import type * as denials from "../denials.js";
 import type * as holdCalls from "../holdCalls.js";
 import type * as http from "../http.js";
+import type * as integrations_index from "../integrations/index.js";
+import type * as integrations_redox from "../integrations/redox.js";
 import type * as organizations from "../organizations.js";
 import type * as seed from "../seed.js";
 import type * as tasks from "../tasks.js";
+import type * as team from "../team.js";
+import type * as utils_enrichment from "../utils/enrichment.js";
+import type * as utils_index from "../utils/index.js";
 
 import type {
   ApiFromModules,
@@ -83,9 +88,14 @@ declare const fullApi: ApiFromModules<{
   denials: typeof denials;
   holdCalls: typeof holdCalls;
   http: typeof http;
+  "integrations/index": typeof integrations_index;
+  "integrations/redox": typeof integrations_redox;
   organizations: typeof organizations;
   seed: typeof seed;
   tasks: typeof tasks;
+  team: typeof team;
+  "utils/enrichment": typeof utils_enrichment;
+  "utils/index": typeof utils_index;
 }>;
 
 /**

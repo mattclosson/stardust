@@ -152,3 +152,230 @@ export const getMyOrganizations = query({
     return orgs.filter((org): org is NonNullable<typeof org> => org !== null)
   },
 })
+
+// Get all organizations for the RCM company (admin view)
+export const listAll = query({
+  args: {},
+  handler: async (ctx) => {
+    const user = await authComponent.getAuthUser(ctx)
+    if (!user) return []
+
+    const rcmUser = await ctx.db
+      .query("rcmUsers")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .first()
+
+    if (!rcmUser) return []
+
+    // Only admins and supervisors can see all organizations
+    if (rcmUser.role !== "admin" && rcmUser.role !== "supervisor") {
+      return []
+    }
+
+    const orgs = await ctx.db
+      .query("organizations")
+      .withIndex("by_rcmCompany", (q) => q.eq("rcmCompanyId", rcmUser.rcmCompanyId))
+      .collect()
+
+    // Get user counts for each org
+    const orgsWithCounts = await Promise.all(
+      orgs.map(async (org) => {
+        const assignments = await ctx.db
+          .query("rcmUserAssignments")
+          .withIndex("by_organization", (q) => q.eq("organizationId", org._id))
+          .collect()
+        
+        return {
+          ...org,
+          userCount: assignments.length,
+        }
+      })
+    )
+
+    return orgsWithCounts
+  },
+})
+
+// Get a single organization by ID
+export const getById = query({
+  args: {
+    organizationId: v.id("organizations"),
+  },
+  handler: async (ctx, args) => {
+    const user = await authComponent.getAuthUser(ctx)
+    if (!user) return null
+
+    const rcmUser = await ctx.db
+      .query("rcmUsers")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .first()
+
+    if (!rcmUser) return null
+
+    const org = await ctx.db.get(args.organizationId)
+    if (!org) return null
+
+    // Verify the org belongs to the user's RCM company
+    if (org.rcmCompanyId !== rcmUser.rcmCompanyId) {
+      return null
+    }
+
+    return org
+  },
+})
+
+// Create a new organization
+export const create = mutation({
+  args: {
+    name: v.string(),
+    npi: v.string(),
+    taxId: v.string(),
+    specialty: v.string(),
+    facilityType: v.union(
+      v.literal("physician_office"),
+      v.literal("hospital_outpatient"),
+      v.literal("asc"),
+      v.literal("clinic")
+    ),
+    address: v.object({
+      line1: v.string(),
+      line2: v.optional(v.string()),
+      city: v.string(),
+      state: v.string(),
+      zip: v.string(),
+    }),
+  },
+  handler: async (ctx, args) => {
+    const user = await authComponent.getAuthUser(ctx)
+    if (!user) throw new Error("Not authenticated")
+
+    const rcmUser = await ctx.db
+      .query("rcmUsers")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .first()
+
+    if (!rcmUser) throw new Error("Not a team member")
+    if (rcmUser.role !== "admin") {
+      throw new Error("Only admins can create organizations")
+    }
+
+    const orgId = await ctx.db.insert("organizations", {
+      ...args,
+      rcmCompanyId: rcmUser.rcmCompanyId,
+      claimCount: 0,
+      denialCount: 0,
+      createdAt: Date.now(),
+    })
+
+    return { organizationId: orgId }
+  },
+})
+
+// Update an organization
+export const update = mutation({
+  args: {
+    organizationId: v.id("organizations"),
+    name: v.optional(v.string()),
+    npi: v.optional(v.string()),
+    taxId: v.optional(v.string()),
+    specialty: v.optional(v.string()),
+    facilityType: v.optional(v.union(
+      v.literal("physician_office"),
+      v.literal("hospital_outpatient"),
+      v.literal("asc"),
+      v.literal("clinic")
+    )),
+    address: v.optional(v.object({
+      line1: v.string(),
+      line2: v.optional(v.string()),
+      city: v.string(),
+      state: v.string(),
+      zip: v.string(),
+    })),
+  },
+  handler: async (ctx, args) => {
+    const user = await authComponent.getAuthUser(ctx)
+    if (!user) throw new Error("Not authenticated")
+
+    const rcmUser = await ctx.db
+      .query("rcmUsers")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .first()
+
+    if (!rcmUser) throw new Error("Not a team member")
+    if (rcmUser.role !== "admin") {
+      throw new Error("Only admins can update organizations")
+    }
+
+    const org = await ctx.db.get(args.organizationId)
+    if (!org) throw new Error("Organization not found")
+    if (org.rcmCompanyId !== rcmUser.rcmCompanyId) {
+      throw new Error("Organization belongs to another company")
+    }
+
+    const { organizationId, ...updates } = args
+    
+    // Filter out undefined values
+    const filteredUpdates: Record<string, unknown> = {}
+    for (const [key, value] of Object.entries(updates)) {
+      if (value !== undefined) {
+        filteredUpdates[key] = value
+      }
+    }
+
+    await ctx.db.patch(args.organizationId, filteredUpdates)
+
+    return { success: true }
+  },
+})
+
+// Delete an organization
+export const remove = mutation({
+  args: {
+    organizationId: v.id("organizations"),
+  },
+  handler: async (ctx, args) => {
+    const user = await authComponent.getAuthUser(ctx)
+    if (!user) throw new Error("Not authenticated")
+
+    const rcmUser = await ctx.db
+      .query("rcmUsers")
+      .withIndex("by_userId", (q) => q.eq("userId", user._id))
+      .first()
+
+    if (!rcmUser) throw new Error("Not a team member")
+    if (rcmUser.role !== "admin") {
+      throw new Error("Only admins can delete organizations")
+    }
+
+    const org = await ctx.db.get(args.organizationId)
+    if (!org) throw new Error("Organization not found")
+    if (org.rcmCompanyId !== rcmUser.rcmCompanyId) {
+      throw new Error("Organization belongs to another company")
+    }
+
+    // Check if org has claims - prevent deletion if so
+    const claims = await ctx.db
+      .query("claims")
+      .withIndex("by_organization", (q) => q.eq("organizationId", args.organizationId))
+      .first()
+
+    if (claims) {
+      throw new Error("Cannot delete organization with existing claims")
+    }
+
+    // Delete all user assignments for this org
+    const assignments = await ctx.db
+      .query("rcmUserAssignments")
+      .withIndex("by_organization", (q) => q.eq("organizationId", args.organizationId))
+      .collect()
+
+    for (const assignment of assignments) {
+      await ctx.db.delete(assignment._id)
+    }
+
+    await ctx.db.delete(args.organizationId)
+
+    return { success: true }
+  },
+})

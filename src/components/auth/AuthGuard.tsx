@@ -8,7 +8,10 @@ interface AuthGuardProps {
 }
 
 // Public routes that don't require authentication
-const publicRoutes = ["/login", "/signup"]
+const publicRoutes = ["/login", "/signup", "/invite"]
+
+// Auth pages that should redirect authenticated users away
+const authPages = ["/login", "/signup"]
 
 export function AuthGuard({ children }: AuthGuardProps) {
   const navigate = useNavigate()
@@ -16,6 +19,10 @@ export function AuthGuard({ children }: AuthGuardProps) {
   const { data: session, isPending } = useSession()
 
   const isPublicRoute = publicRoutes.some(route => 
+    location.pathname === route || location.pathname.startsWith(`${route}/`)
+  )
+
+  const isAuthPage = authPages.some(route => 
     location.pathname === route || location.pathname.startsWith(`${route}/`)
   )
 
@@ -31,11 +38,11 @@ export function AuthGuard({ children }: AuthGuardProps) {
       })
     }
 
-    // If authenticated and on login/signup, redirect to home
-    if (session?.user && isPublicRoute) {
+    // If authenticated and on login/signup (but not invite), redirect to home
+    if (session?.user && isAuthPage) {
       navigate({ to: "/" })
     }
-  }, [session, isPending, isPublicRoute, location.pathname, navigate])
+  }, [session, isPending, isPublicRoute, isAuthPage, location.pathname, navigate])
 
   // Show loading while checking auth
   if (isPending) {
@@ -55,7 +62,7 @@ export function AuthGuard({ children }: AuthGuardProps) {
   }
 
   // Show nothing while redirecting authenticated users from auth pages
-  if (session?.user && isPublicRoute) {
+  if (session?.user && isAuthPage) {
     return null
   }
 

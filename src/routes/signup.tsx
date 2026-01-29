@@ -1,20 +1,51 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router"
-import { useState } from "react"
-import { Mail, Lock, User, Loader2, AlertCircle, CheckCircle } from "lucide-react"
+import { useState, useEffect } from "react"
+import { useQuery, useMutation } from "convex/react"
+import { api } from "../../convex/_generated/api"
+import { Mail, Lock, User, Loader2, AlertCircle, CheckCircle, Sparkles } from "lucide-react"
 import { signUp, signIn } from "@/lib/auth-client"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from "@/components/ui/card"
 import { Separator } from "@/components/ui/separator"
 import { logError } from "@/lib/logger"
 
+// Define search params type
+type SignupSearch = {
+  invite?: string
+}
+
 export const Route = createFileRoute("/signup")({
   component: SignupPage,
+  validateSearch: (search: Record<string, unknown>): SignupSearch => {
+    return {
+      invite: typeof search.invite === "string" ? search.invite : undefined,
+    }
+  },
 })
+
+const ROLE_LABELS: Record<string, string> = {
+  admin: "Admin",
+  supervisor: "Supervisor",
+  billing_specialist: "Billing Specialist",
+  coder: "Coder",
+  appeals_specialist: "Appeals Specialist",
+  viewer: "Viewer",
+}
 
 function SignupPage() {
   const navigate = useNavigate()
+  const { invite: inviteToken } = Route.useSearch()
+
+  // Fetch invite details if token is present
+  const invite = useQuery(
+    api.team.getInviteByToken,
+    inviteToken ? { token: inviteToken } : "skip"
+  )
+  const acceptInvite = useMutation(api.team.acceptInvite)
+
   const [name, setName] = useState("")
   const [email, setEmail] = useState("")
   const [password, setPassword] = useState("")
@@ -22,6 +53,13 @@ function SignupPage() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [success, setSuccess] = useState(false)
+
+  // Pre-fill email if invite specifies one
+  useEffect(() => {
+    if (invite?.email && !email) {
+      setEmail(invite.email)
+    }
+  }, [invite?.email])
 
   const validatePassword = () => {
     if (password.length < 8) {
@@ -54,13 +92,25 @@ function SignupPage() {
 
       if (result.error) {
         setError(result.error.message || "Failed to create account")
-      } else {
-        setSuccess(true)
-        // Auto sign in after signup
-        setTimeout(() => {
-          navigate({ to: "/" })
-        }, 1500)
+        return
       }
+
+      // If there's a valid invite, accept it
+      if (inviteToken && invite?.isValid) {
+        try {
+          await acceptInvite({ token: inviteToken })
+        } catch (inviteErr) {
+          logError("Failed to accept invite", inviteErr)
+          // Still show success but note the invite issue
+          setError("Account created, but failed to join the team. Please try the invite link again after logging in.")
+        }
+      }
+
+      setSuccess(true)
+      // Auto redirect after signup
+      setTimeout(() => {
+        navigate({ to: "/" })
+      }, 1500)
     } catch (err) {
       setError("An unexpected error occurred")
       logError("Email signup failed", err)
@@ -74,9 +124,14 @@ function SignupPage() {
     setIsLoading(true)
 
     try {
+      // Store the invite token in localStorage so we can use it after OAuth redirect
+      if (inviteToken) {
+        localStorage.setItem("pendingInviteToken", inviteToken)
+      }
+
       await signIn.social({
         provider: "google",
-        callbackURL: "/",
+        callbackURL: inviteToken ? `/invite/${inviteToken}` : "/",
       })
     } catch (err) {
       setError("Failed to sign up with Google")
@@ -84,6 +139,9 @@ function SignupPage() {
       setIsLoading(false)
     }
   }
+
+  // Check if invite is invalid or expired
+  const hasInvalidInvite = inviteToken && invite && !invite.isValid
 
   if (success) {
     return (
@@ -95,7 +153,9 @@ function SignupPage() {
             </div>
             <h2 className="text-xl font-semibold">Account Created!</h2>
             <p className="text-muted-foreground">
-              Your account has been created successfully. Redirecting you to the dashboard...
+              {invite?.isValid
+                ? `You've joined ${invite.companyName}. Redirecting to dashboard...`
+                : "Your account has been created successfully. Redirecting you to the dashboard..."}
             </p>
           </CardContent>
         </Card>
@@ -109,10 +169,37 @@ function SignupPage() {
         <CardHeader className="space-y-1 text-center">
           <CardTitle className="text-2xl font-bold">Create an account</CardTitle>
           <CardDescription>
-            Get started with your RCM AI Dashboard
+            {invite?.isValid
+              ? `Join ${invite.companyName} as ${ROLE_LABELS[invite.role] ?? invite.role}`
+              : "Get started with Stardust"}
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Invite Banner */}
+          {invite?.isValid && (
+            <div className="flex items-center gap-3 p-3 rounded-lg bg-primary/10 text-primary">
+              <Sparkles className="w-5 h-5 shrink-0" />
+              <div className="flex-1 text-sm">
+                <p className="font-medium">You've been invited!</p>
+                <p className="text-xs opacity-80">
+                  Joining as <Badge variant="secondary" className="ml-1">{ROLE_LABELS[invite.role]}</Badge>
+                </p>
+              </div>
+            </div>
+          )}
+
+          {/* Invalid Invite Warning */}
+          {hasInvalidInvite && (
+            <div className="flex items-center gap-2 p-3 text-sm text-warning bg-warning/10 rounded-lg">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>
+                {invite.isExpired
+                  ? "This invite has expired. You can still create an account."
+                  : "This invite is no longer valid. You can still create an account."}
+              </span>
+            </div>
+          )}
+
           {/* Error Alert */}
           {error && (
             <div className="flex items-center gap-2 p-3 text-sm text-destructive bg-destructive/10 rounded-lg">
@@ -191,9 +278,14 @@ function SignupPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   className="pl-9"
                   required
-                  disabled={isLoading}
+                  disabled={isLoading || (invite?.email !== undefined && invite.email !== "")}
                 />
               </div>
+              {invite?.email && (
+                <p className="text-xs text-muted-foreground">
+                  This invite is reserved for this email address.
+                </p>
+              )}
             </div>
 
             <div className="space-y-2">
@@ -237,6 +329,8 @@ function SignupPage() {
                   <Loader2 className="w-4 h-4 mr-2 animate-spin" />
                   Creating account...
                 </>
+              ) : invite?.isValid ? (
+                "Create account & join team"
               ) : (
                 "Create account"
               )}

@@ -357,6 +357,7 @@ function TasksPage() {
         title="Reassign Task"
         description={`Reassign "${selectedTask?.title}" to another team member.`}
         currentAssignee={selectedTask?.assignedTo}
+        organizationId={orgId}
         onAssign={confirmReassign}
       />
 
@@ -364,6 +365,7 @@ function TasksPage() {
         open={editDialogOpen}
         onOpenChange={setEditDialogOpen}
         task={selectedTask}
+        organizationId={orgId}
         onSave={confirmEdit}
       />
     </div>

@@ -8,6 +8,7 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  Users,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
@@ -19,6 +20,10 @@ const navigation = [
   { name: "Claims", href: "/claims", icon: FileText },
   { name: "Denials", href: "/denials", icon: XCircle },
   { name: "Tasks", href: "/tasks", icon: CheckSquare },
+]
+
+const settingsNavigation = [
+  { name: "Team", href: "/settings/team", icon: Users },
 ]
 
 export function Sidebar() {
@@ -43,7 +48,7 @@ export function Sidebar() {
             <Sparkles className="w-4 h-4" />
           </div>
           {!collapsed && (
-            <span className="font-semibold text-sm tracking-tight">RCM AI</span>
+            <span className="font-semibold text-sm tracking-tight">Stardust</span>
           )}
         </div>
       </div>
@@ -109,17 +114,31 @@ export function Sidebar() {
           </p>
         )}
         <div className="space-y-0.5">
-          <Link
-            to="/"
-            className={cn(
-              "flex items-center rounded-md text-sm font-medium transition-colors duration-100",
-              collapsed ? "justify-center w-9 h-9 mx-auto" : "gap-2.5 px-2 py-1.5",
-              "text-muted-foreground hover:bg-white/5 hover:text-foreground"
-            )}
-          >
-            <Settings className="w-4 h-4 shrink-0" />
-            {!collapsed && <span>Settings</span>}
-          </Link>
+          {settingsNavigation.map((item) => {
+            const isActive = currentPath.startsWith(item.href)
+
+            return (
+              <Link
+                key={item.name}
+                to={item.href}
+                className={cn(
+                  "flex items-center rounded-md text-sm font-medium transition-colors duration-100",
+                  collapsed ? "justify-center w-9 h-9 mx-auto" : "gap-2.5 px-2 py-1.5",
+                  isActive
+                    ? collapsed 
+                      ? "bg-white/10 text-white"
+                      : "bg-white/10 text-white border-l-2 border-primary -ml-px pl-[calc(0.5rem-1px)]"
+                    : "text-muted-foreground hover:bg-white/5 hover:text-foreground"
+                )}
+              >
+                <item.icon className={cn(
+                  "w-4 h-4 shrink-0 transition-colors duration-100",
+                  isActive ? "text-primary" : ""
+                )} />
+                {!collapsed && <span>{item.name}</span>}
+              </Link>
+            )
+          })}
 
           <Button
             variant="ghost"

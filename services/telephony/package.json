@@ -16,7 +16,7 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "openai": "^4.77.0",
-    "twilio": "^5.4.0",
+    "@signalwire/compatibility-api": "^3.0.0",
     "ws": "^8.18.0"
   },
   "devDependencies": {

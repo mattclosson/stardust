@@ -246,7 +246,7 @@ export function StartHoldCallDialog({
                   <p className="font-medium text-warning">Real Phone Call</p>
                   <p className="text-muted-foreground">
                     This will place an actual phone call to {payerName}. 
-                    Standard calling rates may apply via Twilio.
+                    Standard calling rates may apply via SignalWire.
                   </p>
                 </div>
               </div>

@@ -1,39 +1,40 @@
 import { Router, Request, Response } from "express";
-import twilio from "twilio";
+import { RestClient, Webhook } from "@signalwire/compatibility-api";
 import { callManager } from "../index.js";
 
 const router = Router();
 
-// Twilio client
-const twilioClient = twilio(
-  process.env.TWILIO_ACCOUNT_SID,
-  process.env.TWILIO_AUTH_TOKEN
+// SignalWire client
+const signalwireClient = RestClient(
+  process.env.SIGNALWIRE_PROJECT_ID!,
+  process.env.SIGNALWIRE_API_TOKEN!,
+  { signalwireSpaceUrl: process.env.SIGNALWIRE_SPACE_URL! }
 );
 
-// Validate Twilio signature middleware (for production)
-const validateTwilioRequest = (req: Request, res: Response, next: Function) => {
+// Validate SignalWire signature middleware (for production)
+const validateSignalWireRequest = (req: Request, res: Response, next: Function) => {
   // Skip validation in development
   if (process.env.NODE_ENV === "development") {
     return next();
   }
   
-  const twilioSignature = req.headers["x-twilio-signature"] as string;
+  const signature = req.headers["x-signalwire-signature"] as string;
   const url = `${req.protocol}://${req.get("host")}${req.originalUrl}`;
   
-  if (twilio.validateRequest(
-    process.env.TWILIO_AUTH_TOKEN!,
-    twilioSignature,
+  if (Webhook.validateRequest(
+    process.env.SIGNALWIRE_API_TOKEN!,
+    signature,
     url,
     req.body
   )) {
     next();
   } else {
-    res.status(403).send("Invalid Twilio signature");
+    res.status(403).send("Invalid SignalWire signature");
   }
 };
 
 /**
- * POST /twilio/call
+ * POST /signalwire/call
  * Initiates an outbound call to an insurance company
  */
 router.post("/call", async (req: Request, res: Response) => {
@@ -57,18 +58,18 @@ router.post("/call", async (req: Request, res: Response) => {
     const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
     
     // Create the outbound call
-    const call = await twilioClient.calls.create({
+    const call = await signalwireClient.calls.create({
       to: toNumber,
-      from: process.env.TWILIO_PHONE_NUMBER!,
-      url: `${baseUrl}/twilio/twiml/connect?convexCallId=${convexCallId}`,
-      statusCallback: `${baseUrl}/twilio/status`,
+      from: process.env.SIGNALWIRE_PHONE_NUMBER!,
+      url: `${baseUrl}/signalwire/cxml/connect?convexCallId=${convexCallId}`,
+      statusCallback: `${baseUrl}/signalwire/status`,
       statusCallbackEvent: ["initiated", "ringing", "answered", "completed"],
       statusCallbackMethod: "POST",
       machineDetection: "Enable", // Detect answering machines
       machineDetectionTimeout: 5,
     });
 
-    console.log(`[Twilio] Call initiated: ${call.sid} to ${toNumber}`);
+    console.log(`[SignalWire] Call initiated: ${call.sid} to ${toNumber}`);
 
     // Register the call in our manager with IVR context
     callManager.registerCall(call.sid, {
@@ -90,22 +91,22 @@ router.post("/call", async (req: Request, res: Response) => {
       status: call.status 
     });
   } catch (error) {
-    console.error("[Twilio] Error initiating call:", error);
+    console.error("[SignalWire] Error initiating call:", error);
     res.status(500).json({ error: "Failed to initiate call" });
   }
 });
 
 /**
- * POST /twilio/twiml/connect
- * Returns TwiML to connect the call and start media streaming
+ * POST /signalwire/cxml/connect
+ * Returns cXML to connect the call and start media streaming
  */
-router.post("/twiml/connect", (req: Request, res: Response) => {
+router.post("/cxml/connect", (req: Request, res: Response) => {
   const { convexCallId } = req.query;
   const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
   const wsUrl = baseUrl.replace("http", "ws");
 
-  // TwiML response that streams audio to our WebSocket
-  const twiml = `<?xml version="1.0" encoding="UTF-8"?>
+  // cXML response that streams audio to our WebSocket
+  const cxml = `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Connect>
     <Stream url="${wsUrl}/media-stream">
@@ -115,19 +116,19 @@ router.post("/twiml/connect", (req: Request, res: Response) => {
 </Response>`;
 
   res.type("text/xml");
-  res.send(twiml);
+  res.send(cxml);
 });
 
 /**
- * POST /twilio/status
- * Receives call status updates from Twilio
+ * POST /signalwire/status
+ * Receives call status updates from SignalWire
  */
-router.post("/status", validateTwilioRequest, async (req: Request, res: Response) => {
+router.post("/status", validateSignalWireRequest, async (req: Request, res: Response) => {
   const { CallSid, CallStatus, AnsweredBy, CallDuration } = req.body;
 
-  console.log(`[Twilio] Status update: ${CallSid} -> ${CallStatus}`);
+  console.log(`[SignalWire] Status update: ${CallSid} -> ${CallStatus}`);
 
-  // Map Twilio status to our status
+  // Map SignalWire status to our status
   const statusMap: Record<string, string> = {
     "queued": "initiating",
     "initiated": "initiating",
@@ -152,7 +153,7 @@ router.post("/status", validateTwilioRequest, async (req: Request, res: Response
 });
 
 /**
- * POST /twilio/dtmf
+ * POST /signalwire/dtmf
  * Sends DTMF tones to navigate IVR menus
  * After sending digits, reconnects the media stream to continue listening
  */
@@ -173,7 +174,7 @@ router.post("/dtmf", async (req: Request, res: Response) => {
 
     // Send DTMF tones then reconnect the media stream
     // The Play verb with digits sends DTMF, then Connect resumes streaming
-    await twilioClient.calls(callSid).update({
+    await signalwireClient.calls(callSid).update({
       twiml: `<?xml version="1.0" encoding="UTF-8"?>
 <Response>
   <Play digits="${digits}"/>
@@ -186,16 +187,16 @@ router.post("/dtmf", async (req: Request, res: Response) => {
 </Response>`,
     });
 
-    console.log(`[Twilio] Sent DTMF: ${digits} to call ${callSid}, reconnecting stream`);
+    console.log(`[SignalWire] Sent DTMF: ${digits} to call ${callSid}, reconnecting stream`);
     res.json({ success: true });
   } catch (error) {
-    console.error("[Twilio] Error sending DTMF:", error);
+    console.error("[SignalWire] Error sending DTMF:", error);
     res.status(500).json({ error: "Failed to send DTMF" });
   }
 });
 
 /**
- * POST /twilio/bridge
+ * POST /signalwire/bridge
  * Bridges the call to the user's phone when operator is detected
  */
 router.post("/bridge", async (req: Request, res: Response) => {
@@ -207,28 +208,28 @@ router.post("/bridge", async (req: Request, res: Response) => {
     }
 
     // Update the call to dial the user
-    await twilioClient.calls(callSid).update({
+    await signalwireClient.calls(callSid).update({
       twiml: `<Response>
         <Say>Connecting you to the operator now.</Say>
-        <Dial callerId="${process.env.TWILIO_PHONE_NUMBER}">
+        <Dial callerId="${process.env.SIGNALWIRE_PHONE_NUMBER}">
           <Number>${userPhoneNumber}</Number>
         </Dial>
       </Response>`,
     });
 
-    console.log(`[Twilio] Bridging call ${callSid} to ${userPhoneNumber}`);
+    console.log(`[SignalWire] Bridging call ${callSid} to ${userPhoneNumber}`);
     
     await callManager.updateCallStatus(callSid, "user_connected");
     
     res.json({ success: true });
   } catch (error) {
-    console.error("[Twilio] Error bridging call:", error);
+    console.error("[SignalWire] Error bridging call:", error);
     res.status(500).json({ error: "Failed to bridge call" });
   }
 });
 
 /**
- * POST /twilio/hangup
+ * POST /signalwire/hangup
  * Ends the call
  */
 router.post("/hangup", async (req: Request, res: Response) => {
@@ -239,14 +240,14 @@ router.post("/hangup", async (req: Request, res: Response) => {
       return res.status(400).json({ error: "Missing callSid" });
     }
 
-    await twilioClient.calls(callSid).update({ status: "completed" });
+    await signalwireClient.calls(callSid).update({ status: "completed" });
 
-    console.log(`[Twilio] Ended call ${callSid}`);
+    console.log(`[SignalWire] Ended call ${callSid}`);
     res.json({ success: true });
   } catch (error) {
-    console.error("[Twilio] Error ending call:", error);
+    console.error("[SignalWire] Error ending call:", error);
     res.status(500).json({ error: "Failed to end call" });
   }
 });
 
-export { router as twilioRouter };
+export { router as signalwireRouter };

@@ -1,6 +1,5 @@
 import { HeadContent, Outlet, Scripts, createRootRoute, useLocation } from '@tanstack/react-router'
-import { TanStackRouterDevtoolsPanel } from '@tanstack/react-router-devtools'
-import { TanStackDevtools } from '@tanstack/react-devtools'
+import { TanStackRouterDevtools } from '@tanstack/react-router-devtools'
 
 import { ConvexClientProvider } from '../lib/convex'
 import { Sidebar } from '../components/dashboard/Sidebar'
@@ -11,8 +10,8 @@ import { OrganizationProvider, useOrganization } from '../contexts/OrganizationC
 
 import appCss from '../styles.css?url'
 
-// Routes that should not show the sidebar (auth pages)
-const authRoutes = ['/login', '/signup']
+// Routes that should not show the sidebar (auth pages and invite pages)
+const noSidebarRoutes = ['/login', '/signup', '/invite']
 
 export const Route = createRootRoute({
   head: () => ({
@@ -25,7 +24,7 @@ export const Route = createRootRoute({
         content: 'width=device-width, initial-scale=1',
       },
       {
-        title: 'RCM AI Dashboard',
+        title: 'Stardust',
       },
     ],
     links: [
@@ -61,17 +60,7 @@ function RootDocument({ children }: { children: React.ReactNode }) {
       </head>
       <body>
         {children}
-        <TanStackDevtools
-          config={{
-            position: 'bottom-right',
-          }}
-          plugins={[
-            {
-              name: 'Tanstack Router',
-              render: <TanStackRouterDevtoolsPanel />,
-            },
-          ]}
-        />
+        {/* <TanStackRouterDevtools initialIsOpen={false} position="bottom-right" /> */}
         <Scripts />
       </body>
     </html>
@@ -89,15 +78,17 @@ function CallBannerWrapper() {
 
 function RootLayout() {
   const location = useLocation()
-  const isAuthPage = authRoutes.some(route => location.pathname === route)
+  const isNoSidebarPage = noSidebarRoutes.some(route => 
+    location.pathname === route || location.pathname.startsWith(`${route}/`)
+  )
 
   return (
     <ConvexClientProvider>
       <OrganizationProvider>
         <TooltipProvider>
           <AuthGuard>
-            {isAuthPage ? (
-              // Auth pages - no sidebar
+            {isNoSidebarPage ? (
+              // Auth/invite pages - no sidebar
               <Outlet />
             ) : (
               // Dashboard pages - with sidebar

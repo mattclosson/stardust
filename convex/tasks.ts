@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server"
 import { v } from "convex/values"
+import { enrichTaskWithRelatedEntities } from "./utils/enrichment"
 
 // List tasks with filtering
 export const list = query({
@@ -40,38 +41,9 @@ export const list = query({
       tasks = await ctx.db.query("tasks").order("desc").take(limit)
     }
 
-    // Enrich with related entity info
+    // Enrich with related entity info using shared utility
     const enrichedTasks = await Promise.all(
-      tasks.map(async (task) => {
-        const claim = task.claimId ? await ctx.db.get(task.claimId) : null
-        const denial = task.denialId ? await ctx.db.get(task.denialId) : null
-        const patient = task.patientId ? await ctx.db.get(task.patientId) : null
-
-        return {
-          ...task,
-          claim: claim
-            ? {
-                _id: claim._id,
-                claimNumber: claim.claimNumber,
-                status: claim.status,
-              }
-            : null,
-          denial: denial
-            ? {
-                _id: denial._id,
-                denialCode: denial.denialCode,
-                status: denial.status,
-              }
-            : null,
-          patient: patient
-            ? {
-                _id: patient._id,
-                firstName: patient.firstName,
-                lastName: patient.lastName,
-              }
-            : null,
-        }
-      })
+      tasks.map((task) => enrichTaskWithRelatedEntities(ctx, task))
     )
 
     return enrichedTasks

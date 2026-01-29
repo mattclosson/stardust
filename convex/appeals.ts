@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server"
 import { v } from "convex/values"
+import { enrichAppealWithDenialAndClaim } from "./utils/enrichment"
 
 // List appeals
 export const list = query({
@@ -30,31 +31,9 @@ export const list = query({
       appeals = await ctx.db.query("appeals").order("desc").take(limit)
     }
 
-    // Enrich with denial and claim info
+    // Enrich with denial and claim info using shared utility
     const enrichedAppeals = await Promise.all(
-      appeals.map(async (appeal) => {
-        const denial = await ctx.db.get(appeal.denialId)
-        const claim = await ctx.db.get(appeal.claimId)
-
-        return {
-          ...appeal,
-          denial: denial
-            ? {
-                _id: denial._id,
-                denialCode: denial.denialCode,
-                denialReason: denial.denialReason,
-                denialCategory: denial.denialCategory,
-              }
-            : null,
-          claim: claim
-            ? {
-                _id: claim._id,
-                claimNumber: claim.claimNumber,
-                totalCharges: claim.totalCharges,
-              }
-            : null,
-        }
-      })
+      appeals.map((appeal) => enrichAppealWithDenialAndClaim(ctx, appeal))
     )
 
     return enrichedAppeals
@@ -158,20 +137,35 @@ export const update = mutation({
 
     await ctx.db.patch(appealId, updateData)
 
-    // If appeal is decided, update denial status
+    // If appeal is decided, update denial and potentially claim status
     if (updates.outcome) {
       const appeal = await ctx.db.get(appealId)
       if (appeal) {
-        const denialStatus =
-          updates.outcome === "overturned"
-            ? "overturned"
-            : updates.outcome === "upheld"
-              ? "upheld"
-              : "appeal_submitted"
+        // Map outcome to denial status
+        const denialStatusMap: Record<string, string> = {
+          overturned: "overturned",
+          partially_overturned: "overturned", // Treat partial as overturned for denial tracking
+          upheld: "upheld",
+        }
+        const denialStatus = denialStatusMap[updates.outcome] || "appeal_submitted"
 
         await ctx.db.patch(appeal.denialId, {
           status: denialStatus as never,
         })
+
+        // If overturned, update claim status to indicate it should be reprocessed
+        if (updates.outcome === "overturned" || updates.outcome === "partially_overturned") {
+          const denial = await ctx.db.get(appeal.denialId)
+          if (denial) {
+            const claim = await ctx.db.get(denial.claimId)
+            if (claim && claim.status === "denied") {
+              await ctx.db.patch(denial.claimId, {
+                status: "appealed",
+                updatedAt: Date.now(),
+              })
+            }
+          }
+        }
       }
     }
 

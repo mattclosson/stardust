@@ -62,6 +62,7 @@ export class CallManager {
 
   /**
    * Start audio processing for a call
+   * Preserves IvrNavigator and OperatorDetector state across stream reconnections
    */
   async startAudioProcessing(twilioCallSid: string, ws: WebSocket): Promise<void> {
     const call = this.calls.get(twilioCallSid);
@@ -72,48 +73,61 @@ export class CallManager {
 
     call.ws = ws;
 
-    // Initialize audio processor
+    // Always create a new audio processor (old one was closed on stream stop)
     call.audioProcessor = new AudioProcessor();
     await call.audioProcessor.initialize();
 
-    // Build call context for IVR navigation
-    const callContext: CallContext = {
-      payerName: call.info.payerName,
-      callPurpose: call.info.callPurpose || "general",
-      organizationNpi: call.info.organizationNpi,
-      memberId: call.info.memberId,
-      claimNumber: call.info.claimNumber,
-    };
+    // Check if this is a reconnection (IvrNavigator already exists)
+    const isReconnection = !!call.ivrNavigator;
 
-    // Initialize IVR navigator with callbacks
-    call.ivrNavigator = new IvrNavigator(
-      callContext,
-      // DTMF callback
-      async (digits: string) => {
-        await this.sendDtmf(twilioCallSid, digits);
-      },
-      // Operator detected callback
-      async () => {
-        console.log(`[CallManager] Operator detected by IVR navigator for ${twilioCallSid}`);
-        await this.handleOperatorDetected(twilioCallSid);
-      },
-      // Status update callback
-      async (status: string) => {
-        await this.updateCallStatus(twilioCallSid, status);
-      }
-    );
+    if (!isReconnection) {
+      // First connection - create IvrNavigator and OperatorDetector
+      const callContext: CallContext = {
+        payerName: call.info.payerName,
+        callPurpose: call.info.callPurpose || "general",
+        organizationNpi: call.info.organizationNpi,
+        memberId: call.info.memberId,
+        claimNumber: call.info.claimNumber,
+      };
 
-    // Initialize operator detector as backup (IvrNavigator also detects operators)
-    call.operatorDetector = new OperatorDetector(
-      call.info.payerName || "insurance company",
-      async (isOperator, confidence, reason) => {
-        // Only trigger if IvrNavigator hasn't already detected
-        if (isOperator && confidence > 0.7 && !call.ivrNavigator?.isOperatorDetectedStatus()) {
-          console.log(`[CallManager] Operator detected by backup detector for ${twilioCallSid}: ${reason}`);
+      // Initialize IVR navigator with callbacks
+      call.ivrNavigator = new IvrNavigator(
+        callContext,
+        // DTMF callback
+        async (digits: string) => {
+          await this.sendDtmf(twilioCallSid, digits);
+        },
+        // Operator detected callback
+        async () => {
+          console.log(`[CallManager] Operator detected by IVR navigator for ${twilioCallSid}`);
           await this.handleOperatorDetected(twilioCallSid);
+        },
+        // Status update callback
+        async (status: string) => {
+          await this.updateCallStatus(twilioCallSid, status);
         }
-      }
-    );
+      );
+
+      // Initialize operator detector as backup (IvrNavigator also detects operators)
+      call.operatorDetector = new OperatorDetector(
+        call.info.payerName || "insurance company",
+        async (isOperator, confidence, reason) => {
+          // Only trigger if IvrNavigator hasn't already detected
+          if (isOperator && confidence > 0.7 && !call.ivrNavigator?.isOperatorDetectedStatus()) {
+            console.log(`[CallManager] Operator detected by backup detector for ${twilioCallSid}: ${reason}`);
+            await this.handleOperatorDetected(twilioCallSid);
+          }
+        }
+      );
+
+      console.log(`[CallManager] Audio processing started for: ${twilioCallSid}`);
+      console.log(`[CallManager] IVR context: purpose=${callContext.callPurpose}, hasNpi=${!!callContext.organizationNpi}, hasMemberId=${!!callContext.memberId}`);
+    } else {
+      // Reconnection - reuse existing IvrNavigator and OperatorDetector (preserves action history)
+      // Resume analysis that was paused during DTMF sending
+      call.ivrNavigator.resume();
+      console.log(`[CallManager] Audio processing reconnected for: ${twilioCallSid} (preserving IVR state)`);
+    }
 
     // Connect audio processor to IVR navigator (which also feeds operator detector)
     call.audioProcessor.onTranscription((text) => {
@@ -122,9 +136,6 @@ export class CallManager {
       // Also feed to backup operator detector
       call.operatorDetector?.addTranscription(text);
     });
-
-    console.log(`[CallManager] Audio processing started for: ${twilioCallSid}`);
-    console.log(`[CallManager] IVR context: purpose=${callContext.callPurpose}, hasNpi=${!!callContext.organizationNpi}, hasMemberId=${!!callContext.memberId}`);
   }
 
   /**
@@ -141,7 +152,7 @@ export class CallManager {
       const baseUrl = process.env.BASE_URL || `http://localhost:${process.env.PORT || 3001}`;
       
       // Call our own DTMF endpoint
-      const response = await fetch(`${baseUrl}/twilio/dtmf`, {
+      const response = await fetch(`${baseUrl}/signalwire/dtmf`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -177,26 +188,26 @@ export class CallManager {
 
   /**
    * Stop audio processing for a call
+   * Only closes AudioProcessor - IvrNavigator and OperatorDetector are preserved for reconnection
    */
   async stopAudioProcessing(twilioCallSid: string): Promise<void> {
     const call = this.calls.get(twilioCallSid);
     if (!call) return;
 
+    // Pause IvrNavigator analysis during stream disconnection
+    // This prevents re-analyzing stale transcription data
+    if (call.ivrNavigator) {
+      call.ivrNavigator.pause();
+    }
+
+    // Only close AudioProcessor - it will be recreated on reconnection
+    // IvrNavigator and OperatorDetector are preserved to maintain action history
     if (call.audioProcessor) {
       await call.audioProcessor.close();
       call.audioProcessor = undefined;
     }
 
-    if (call.ivrNavigator) {
-      call.ivrNavigator.destroy();
-      call.ivrNavigator = undefined;
-    }
-
-    if (call.operatorDetector) {
-      call.operatorDetector = undefined;
-    }
-
-    console.log(`[CallManager] Audio processing stopped for: ${twilioCallSid}`);
+    console.log(`[CallManager] Audio processing stopped for: ${twilioCallSid} (IVR state preserved)`);
   }
 
   /**
@@ -293,10 +304,29 @@ export class CallManager {
   }
 
   /**
-   * Clean up a call
+   * Clean up a call completely (called when call ends)
    */
   async cleanup(twilioCallSid: string): Promise<void> {
-    await this.stopAudioProcessing(twilioCallSid);
+    const call = this.calls.get(twilioCallSid);
+    if (call) {
+      // Close audio processor
+      if (call.audioProcessor) {
+        await call.audioProcessor.close();
+        call.audioProcessor = undefined;
+      }
+
+      // Destroy IVR navigator
+      if (call.ivrNavigator) {
+        call.ivrNavigator.destroy();
+        call.ivrNavigator = undefined;
+      }
+
+      // Clear operator detector
+      if (call.operatorDetector) {
+        call.operatorDetector = undefined;
+      }
+    }
+
     this.calls.delete(twilioCallSid);
     console.log(`[CallManager] Cleaned up call: ${twilioCallSid}`);
   }

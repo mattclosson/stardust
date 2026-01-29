@@ -5,31 +5,19 @@ import { api } from "../../../convex/_generated/api"
 import type { Id } from "../../../convex/_generated/dataModel"
 import {
   ArrowLeft,
-  User,
-  Building,
-  DollarSign,
-  FileText,
   Sparkles,
-  Clock,
-  CheckCircle,
-  XCircle,
   Send,
   Copy,
-  Edit,
-  Lightbulb,
-  TrendingUp,
   Loader2,
   Phone,
 } from "lucide-react"
 import { DashboardHeader } from "@/components/dashboard/DashboardHeader"
-import { StatusBadge } from "@/components/dashboard/StatusBadge"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { Label } from "@/components/ui/label"
-import { Progress } from "@/components/ui/progress"
 import { Skeleton } from "@/components/ui/skeleton"
 import {
   Select,
@@ -48,10 +36,17 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/dialogs/ConfirmDialog"
+import { RecordOutcomeDialog } from "@/components/dialogs/RecordOutcomeDialog"
 import { StartHoldCallDialog } from "@/components/dialogs/StartHoldCallDialog"
-import { CallStatusBadge } from "@/components/calls/CallStatusBadge"
-import { Separator } from "@/components/ui/separator"
-import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils"
+import { AppealStatusCard } from "@/components/appeals/AppealStatusCard"
+import {
+  DenialHeader,
+  AIAnalysisCard,
+  SimilarDenialsTab,
+  DenialHistoryTab,
+  AppealLetterTab,
+} from "@/components/denials"
+import { CallHistoryTab } from "@/components/shared/CallHistoryTab"
 import { logError } from "@/lib/logger"
 
 export const Route = createFileRoute("/denials/$denialId")({
@@ -64,6 +59,9 @@ function DenialDetailPage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [showAppealDialog, setShowAppealDialog] = useState(false)
   const [showWriteOffDialog, setShowWriteOffDialog] = useState(false)
+  const [showOutcomeDialog, setShowOutcomeDialog] = useState(false)
+  const [selectedAppealId, setSelectedAppealId] = useState<string | null>(null)
+  const [viewLetterDialog, setViewLetterDialog] = useState<{ open: boolean; letter: string }>({ open: false, letter: "" })
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [appealType, setAppealType] = useState<"reconsideration" | "formal_appeal" | "external_review">("reconsideration")
   const [submissionMethod, setSubmissionMethod] = useState<"electronic" | "fax" | "mail" | "portal">("electronic")
@@ -85,6 +83,8 @@ function DenialDetailPage() {
   // Mutations
   const generateAppealLetter = useMutation(api.ai.appealGenerator.generateAppealLetter)
   const createAppeal = useMutation(api.appeals.create)
+  const submitAppeal = useMutation(api.appeals.submit)
+  const updateAppeal = useMutation(api.appeals.update)
   const updateDenialStatus = useMutation(api.denials.updateStatus)
 
   const isLoading = denial === undefined
@@ -143,13 +143,12 @@ function DenialDetailPage() {
       await createAppeal({
         denialId: denialId as Id<"denials">,
         claimId: denial.claim._id,
-        appealLevel: 1,
+        appealLevel: nextAppealLevel,
         appealType,
         submissionMethod,
         generatedAppealLetter: appealLetter || undefined,
       })
       setShowAppealDialog(false)
-      // Reset form
       setAppealLetter("")
       setAppealType("reconsideration")
       setSubmissionMethod("electronic")
@@ -166,11 +165,60 @@ function DenialDetailPage() {
     })
   }
 
-  const overturnRate = similarDenials ? similarDenials.overturnRate * 100 : 0
+  const handleSubmitAppealStatus = async (appealId: string) => {
+    try {
+      await submitAppeal({ appealId: appealId as Id<"appeals"> })
+    } catch (error) {
+      logError("Failed to submit appeal", error)
+    }
+  }
+
+  const handleRecordOutcome = async (outcome: {
+    outcome: "overturned" | "partially_overturned" | "upheld"
+    responseNotes?: string
+  }) => {
+    if (!selectedAppealId) return
+    try {
+      await updateAppeal({
+        appealId: selectedAppealId as Id<"appeals">,
+        status: "decided",
+        outcome: outcome.outcome,
+        responseNotes: outcome.responseNotes,
+      })
+    } catch (error) {
+      logError("Failed to record outcome", error)
+    }
+  }
+
+  const openOutcomeDialog = (appealId: string) => {
+    setSelectedAppealId(appealId)
+    setShowOutcomeDialog(true)
+  }
+
+  const openViewLetter = (_appealId: string, letter: string) => {
+    setViewLetterDialog({ open: true, letter })
+  }
+
+  const overturnRate = similarDenials?.overturnRate || 0
   const overturnedCount = similarDenials?.overturnedCount || 0
   const totalSimilar = similarDenials?.totalCount || 0
 
-  const canAppeal = !["appealing", "appeal_submitted", "overturned", "upheld", "written_off"].includes(denial.status)
+  // Determine what level the next appeal would be
+  const existingAppeals = ("appeals" in denial ? denial.appeals : []) || []
+  const latestAppeal = existingAppeals.length > 0 
+    ? existingAppeals.reduce((latest, appeal) => 
+        appeal.appealLevel > latest.appealLevel ? appeal : latest
+      , existingAppeals[0])
+    : null
+  
+  const canAppeal = 
+    (existingAppeals.length === 0 && !["overturned", "written_off"].includes(denial.status)) ||
+    (latestAppeal?.status === "decided" && latestAppeal?.outcome === "upheld" && latestAppeal.appealLevel < 3)
+  
+  const nextAppealLevel = latestAppeal ? latestAppeal.appealLevel + 1 : 1
+
+  const patient = "patient" in denial ? denial.patient : null
+  const payer = "payer" in denial ? denial.payer : null
 
   return (
     <div className="flex flex-col min-h-screen">
@@ -186,7 +234,7 @@ function DenialDetailPage() {
             </Link>
           </Button>
           <div className="flex items-center gap-2">
-            {"payer" in denial && denial.payer && (
+            {payer && (
               <Button
                 variant="outline"
                 className="gap-2"
@@ -207,14 +255,19 @@ function DenialDetailPage() {
               <DialogTrigger asChild>
                 <Button className="gap-2" disabled={!canAppeal}>
                   <Send className="w-4 h-4" />
-                  Start Appeal
+                  {nextAppealLevel > 1 ? `Start Level ${nextAppealLevel} Appeal` : "Start Appeal"}
                 </Button>
               </DialogTrigger>
               <DialogContent className="max-w-2xl">
                 <DialogHeader>
-                  <DialogTitle>Submit Appeal</DialogTitle>
+                  <DialogTitle>
+                    {nextAppealLevel > 1 ? `Submit Level ${nextAppealLevel} Appeal` : "Submit Appeal"}
+                  </DialogTitle>
                   <DialogDescription>
-                    Review and submit the appeal for denial {denial.denialCode}
+                    {nextAppealLevel > 1 
+                      ? `Create a Level ${nextAppealLevel} appeal after the previous appeal was upheld.`
+                      : `Review and submit the appeal for denial ${denial.denialCode}`
+                    }
                   </DialogDescription>
                 </DialogHeader>
                 <div className="space-y-4">
@@ -229,15 +282,9 @@ function DenialDetailPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          <SelectItem value="reconsideration">
-                            Reconsideration
-                          </SelectItem>
-                          <SelectItem value="formal_appeal">
-                            Formal Appeal
-                          </SelectItem>
-                          <SelectItem value="external_review">
-                            External Review
-                          </SelectItem>
+                          <SelectItem value="reconsideration">Reconsideration</SelectItem>
+                          <SelectItem value="formal_appeal">Formal Appeal</SelectItem>
+                          <SelectItem value="external_review">External Review</SelectItem>
                         </SelectContent>
                       </Select>
                     </div>
@@ -301,165 +348,28 @@ function DenialDetailPage() {
 
         {/* Denial Header */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          <Card className="lg:col-span-2">
-            <CardContent className="p-6">
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <span className="text-2xl font-bold font-mono">
-                    {denial.denialCode}
-                  </span>
-                  <StatusBadge status={denial.status} type="denial" />
-                  <Badge variant="outline" className="capitalize">
-                    {denial.denialCategory.replace(/_/g, " ")}
-                  </Badge>
-                </div>
-
-                <p className="text-muted-foreground">{denial.denialReason}</p>
-
-                <Separator />
-
-                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
-                  <div className="flex items-start gap-3">
-                    <FileText className="w-5 h-5 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Claim</p>
-                      <Link
-                        to="/claims/$claimId"
-                        params={{ claimId: denial.claim?._id || "" }}
-                        className="font-medium text-primary hover:underline"
-                      >
-                        {denial.claim?.claimNumber || "-"}
-                      </Link>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <User className="w-5 h-5 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Patient</p>
-                      <p className="font-medium">
-                        {"patient" in denial && denial.patient
-                          ? `${denial.patient.firstName} ${denial.patient.lastName}`
-                          : "-"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <Building className="w-5 h-5 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Payer</p>
-                      <p className="font-medium">
-                        {"payer" in denial && denial.payer ? denial.payer.name : "-"}
-                      </p>
-                    </div>
-                  </div>
-
-                  <div className="flex items-start gap-3">
-                    <DollarSign className="w-5 h-5 text-muted-foreground mt-0.5" />
-                    <div>
-                      <p className="text-sm text-muted-foreground">Amount</p>
-                      <p className="font-medium text-destructive">
-                        {denial.claim
-                          ? formatCurrency(denial.claim.totalCharges)
-                          : "-"}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-
-                {denial.appealDeadline && (
-                  <div className="flex items-center gap-2 p-3 rounded-lg bg-warning/10 border border-warning/20">
-                    <Clock className="w-5 h-5 text-warning" />
-                    <span className="text-sm">
-                      Appeal deadline:{" "}
-                      <span className="font-medium">
-                        {formatDate(denial.appealDeadline)}
-                      </span>
-                    </span>
-                  </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-
-          {/* AI Analysis Card */}
-          <Card className="bg-gradient-to-br from-primary/5 to-primary/10">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Sparkles className="w-5 h-5 text-primary" />
-                AI Analysis
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* Overturn Likelihood */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">
-                    Overturn Likelihood
-                  </span>
-                  <span
-                    className={`font-bold ${
-                      denial.overturnLikelihood && denial.overturnLikelihood > 0.6
-                        ? "text-success"
-                        : denial.overturnLikelihood && denial.overturnLikelihood > 0.3
-                          ? "text-warning"
-                          : "text-muted-foreground"
-                    }`}
-                  >
-                    {denial.overturnLikelihood
-                      ? `${(denial.overturnLikelihood * 100).toFixed(0)}%`
-                      : "N/A"}
-                  </span>
-                </div>
-                <Progress
-                  value={(denial.overturnLikelihood || 0) * 100}
-                  className="h-2"
-                />
-              </div>
-
-              {/* Similar Denials */}
-              <div>
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm text-muted-foreground">
-                    Similar Denials
-                  </span>
-                  <span className="font-medium">
-                    {denial.similarDenialCount || totalSimilar}
-                  </span>
-                </div>
-                <div className="text-xs text-muted-foreground">
-                  Historical overturn rate:{" "}
-                  <span className="font-medium text-success">
-                    {overturnRate.toFixed(0)}%
-                  </span>
-                </div>
-              </div>
-
-              <Separator />
-
-              {/* Suggested Action */}
-              {denial.suggestedAction && (
-                <div>
-                  <div className="flex items-center gap-2 mb-2">
-                    <Lightbulb className="w-4 h-4 text-primary" />
-                    <span className="text-sm font-medium">
-                      Recommended Action
-                    </span>
-                  </div>
-                  <p className="text-sm text-muted-foreground">
-                    {denial.suggestedAction}
-                  </p>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          <DenialHeader denial={denial} patient={patient} payer={payer} />
+          <AIAnalysisCard
+            overturnLikelihood={denial.overturnLikelihood}
+            similarDenialCount={denial.similarDenialCount}
+            totalSimilar={totalSimilar}
+            overturnRate={overturnRate}
+            suggestedAction={denial.suggestedAction}
+          />
         </div>
 
         {/* Tabs */}
-        <Tabs defaultValue="appeal" className="space-y-4">
+        <Tabs defaultValue="appeals" className="space-y-4">
           <TabsList>
-            <TabsTrigger value="appeal">Appeal Letter</TabsTrigger>
+            <TabsTrigger value="appeals">
+              Appeals
+              {existingAppeals.length > 0 && (
+                <Badge variant="secondary" className="ml-2">
+                  {existingAppeals.length}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="letter">Appeal Letter</TabsTrigger>
             <TabsTrigger value="similar">Similar Denials</TabsTrigger>
             <TabsTrigger value="calls">
               Call History
@@ -472,316 +382,58 @@ function DenialDetailPage() {
             <TabsTrigger value="history">History</TabsTrigger>
           </TabsList>
 
-          {/* Appeal Letter Tab */}
-          <TabsContent value="appeal">
-            <Card>
-              <CardHeader className="flex flex-row items-center justify-between">
-                <CardTitle>AI-Generated Appeal Letter</CardTitle>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={handleGenerateAppeal}
-                    disabled={isGenerating}
-                    className="gap-2"
-                  >
-                    <Sparkles className="w-4 h-4" />
-                    {isGenerating ? "Generating..." : appealLetter ? "Regenerate" : "Generate with AI"}
-                  </Button>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    className="gap-2"
-                    onClick={() => navigator.clipboard.writeText(appealLetter)}
-                    disabled={!appealLetter}
-                  >
-                    <Copy className="w-4 h-4" />
-                    Copy
-                  </Button>
-                  <Button variant="outline" size="sm" className="gap-2" disabled={!appealLetter}>
-                    <Edit className="w-4 h-4" />
-                    Edit
-                  </Button>
-                </div>
-              </CardHeader>
-              <CardContent>
-                <div className="relative">
-                  {isGenerating && (
-                    <div className="absolute inset-0 bg-background/80 flex items-center justify-center z-10 rounded-lg">
-                      <div className="flex items-center gap-2">
-                        <Sparkles className="w-5 h-5 text-primary animate-pulse" />
-                        <span>Generating appeal letter...</span>
-                      </div>
-                    </div>
-                  )}
-                  <Textarea
-                    value={appealLetter}
-                    onChange={(e) => setAppealLetter(e.target.value)}
-                    className="min-h-[400px] font-mono text-sm"
-                    placeholder="Click 'Generate with AI' above to create a customized appeal letter based on this denial..."
-                  />
-                </div>
-              </CardContent>
-            </Card>
+          <TabsContent value="appeals">
+            <AppealStatusCard
+              appeals={existingAppeals.map(appeal => ({
+                _id: appeal._id,
+                appealLevel: appeal.appealLevel,
+                appealType: appeal.appealType,
+                submissionMethod: appeal.submissionMethod,
+                status: appeal.status,
+                outcome: appeal.outcome,
+                generatedAppealLetter: appeal.generatedAppealLetter,
+                submittedAt: appeal.submittedAt,
+                responseReceivedAt: appeal.responseReceivedAt,
+                responseNotes: appeal.responseNotes,
+                createdAt: appeal.createdAt,
+              }))}
+              canCreateAppeal={canAppeal}
+              onCreateAppeal={() => setShowAppealDialog(true)}
+              onSubmitAppeal={handleSubmitAppealStatus}
+              onRecordOutcome={openOutcomeDialog}
+              onViewLetter={openViewLetter}
+            />
           </TabsContent>
 
-          {/* Similar Denials Tab */}
+          <TabsContent value="letter">
+            <AppealLetterTab
+              appealLetter={appealLetter}
+              isGenerating={isGenerating}
+              onAppealLetterChange={setAppealLetter}
+              onGenerateAppeal={handleGenerateAppeal}
+            />
+          </TabsContent>
+
           <TabsContent value="similar">
-            <Card>
-              <CardHeader>
-                <CardTitle>Similar Denials Analysis</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-muted flex items-center justify-center">
-                          <FileText className="w-5 h-5" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">
-                            Total Similar
-                          </p>
-                          <p className="text-2xl font-bold">{totalSimilar}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-success/10 flex items-center justify-center">
-                          <CheckCircle className="w-5 h-5 text-success" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">
-                            Overturned
-                          </p>
-                          <p className="text-2xl font-bold">{overturnedCount}</p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-
-                  <Card>
-                    <CardContent className="p-4">
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center">
-                          <TrendingUp className="w-5 h-5 text-primary" />
-                        </div>
-                        <div>
-                          <p className="text-sm text-muted-foreground">
-                            Success Rate
-                          </p>
-                          <p className="text-2xl font-bold">
-                            {overturnRate.toFixed(0)}%
-                          </p>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </div>
-
-                {similarDenials?.similarDenials && similarDenials.similarDenials.length > 0 ? (
-                  <div className="space-y-3">
-                    {similarDenials.similarDenials.slice(0, 5).map((similar) => (
-                      <div
-                        key={similar._id}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div
-                            className={`w-8 h-8 rounded-full flex items-center justify-center ${
-                              similar.status === "overturned"
-                                ? "bg-success/10"
-                                : "bg-muted"
-                            }`}
-                          >
-                            {similar.status === "overturned" ? (
-                              <CheckCircle className="w-4 h-4 text-success" />
-                            ) : (
-                              <XCircle className="w-4 h-4 text-muted-foreground" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="font-medium font-mono">
-                              {similar.denialCode}
-                            </p>
-                            <p className="text-sm text-muted-foreground capitalize">
-                              {similar.denialCategory.replace(/_/g, " ")}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <StatusBadge status={similar.status} type="denial" />
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {formatDate(similar.receivedAt)}
-                          </p>
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="text-center text-muted-foreground py-8">
-                    No similar denials found in the system.
-                  </p>
-                )}
-              </CardContent>
-            </Card>
+            <SimilarDenialsTab
+              totalSimilar={totalSimilar}
+              overturnedCount={overturnedCount}
+              overturnRate={overturnRate}
+              similarDenials={similarDenials?.similarDenials}
+            />
           </TabsContent>
 
-          {/* Call History Tab */}
           <TabsContent value="calls">
-            <Card>
-              <CardHeader>
-                <CardTitle>Call History</CardTitle>
-              </CardHeader>
-              <CardContent>
-                {!callHistory || callHistory.length === 0 ? (
-                  <div className="text-center py-8">
-                    <Phone className="w-12 h-12 mx-auto text-muted-foreground mb-3" />
-                    <p className="text-muted-foreground">No calls recorded for this denial.</p>
-                    {"payer" in denial && denial.payer && (
-                      <Button
-                        variant="outline"
-                        className="mt-4 gap-2"
-                        onClick={() => setShowCallDialog(true)}
-                      >
-                        <Phone className="w-4 h-4" />
-                        Call Payer
-                      </Button>
-                    )}
-                  </div>
-                ) : (
-                  <div className="space-y-3">
-                    {callHistory.map((call) => (
-                      <div
-                        key={call._id}
-                        className="flex items-center justify-between p-4 rounded-lg border border-border"
-                      >
-                        <div className="flex items-center gap-4">
-                          <div
-                            className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                              call.status === "completed"
-                                ? "bg-success/10"
-                                : call.status === "cancelled" || call.status === "failed"
-                                  ? "bg-destructive/10"
-                                  : "bg-warning/10"
-                            }`}
-                          >
-                            <Phone
-                              className={`w-5 h-5 ${
-                                call.status === "completed"
-                                  ? "text-success"
-                                  : call.status === "cancelled" || call.status === "failed"
-                                    ? "text-destructive"
-                                    : "text-warning"
-                              }`}
-                            />
-                          </div>
-                          <div>
-                            <p className="font-medium">
-                              {call.payer?.name || "Unknown Payer"}
-                            </p>
-                            <p className="text-sm text-muted-foreground">
-                              {formatDateTime(call.startedAt)}
-                            </p>
-                          </div>
-                        </div>
-                        <div className="text-right">
-                          <CallStatusBadge status={call.status} />
-                          {call.totalHoldTimeSeconds && (
-                            <p className="text-xs text-muted-foreground mt-1">
-                              Hold time: {Math.floor(call.totalHoldTimeSeconds / 60)}m {call.totalHoldTimeSeconds % 60}s
-                            </p>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </CardContent>
-            </Card>
+            <CallHistoryTab
+              callHistory={callHistory}
+              hasPayer={!!payer}
+              onCallPayer={() => setShowCallDialog(true)}
+              emptyMessage="No calls recorded for this denial."
+            />
           </TabsContent>
 
-          {/* History Tab */}
           <TabsContent value="history">
-            <Card>
-              <CardHeader>
-                <CardTitle>Denial History</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="relative">
-                  <div className="absolute left-4 top-0 bottom-0 w-px bg-border" />
-
-                  <div className="space-y-6">
-                    <div className="relative flex gap-4">
-                      <div className="relative z-10 flex items-center justify-center w-8 h-8 rounded-full bg-destructive text-destructive-foreground">
-                        <XCircle className="w-4 h-4" />
-                      </div>
-                      <div className="flex-1 pb-6">
-                        <div className="flex items-center gap-2">
-                          <StatusBadge status="new" type="denial" />
-                        </div>
-                        <p className="text-sm mt-1">Denial received from payer</p>
-                        <p className="text-xs text-muted-foreground mt-1">
-                          {formatDateTime(denial.receivedAt)} • Payer
-                        </p>
-                      </div>
-                    </div>
-
-                    {denial.status !== "new" && (
-                      <div className="relative flex gap-4">
-                        <div className="relative z-10 flex items-center justify-center w-8 h-8 rounded-full bg-warning text-warning-foreground">
-                          <Clock className="w-4 h-4" />
-                        </div>
-                        <div className="flex-1 pb-6">
-                          <div className="flex items-center gap-2">
-                            <StatusBadge status={denial.status} type="denial" />
-                          </div>
-                          <p className="text-sm mt-1">Status updated</p>
-                          <p className="text-xs text-muted-foreground mt-1">
-                            {formatDateTime(denial._creationTime)} • System
-                          </p>
-                        </div>
-                      </div>
-                    )}
-
-                    {"appeals" in denial && denial.appeals && denial.appeals.length > 0 && (
-                      denial.appeals.map((appeal: {
-                        _id: string;
-                        appealType: string;
-                        appealLevel: number;
-                        status: string;
-                        createdAt: number;
-                      }) => (
-                        <div key={appeal._id} className="relative flex gap-4">
-                          <div className="relative z-10 flex items-center justify-center w-8 h-8 rounded-full bg-primary text-primary-foreground">
-                            <Send className="w-4 h-4" />
-                          </div>
-                          <div className="flex-1 pb-6">
-                            <div className="flex items-center gap-2">
-                              <Badge variant="outline" className="capitalize">
-                                {appeal.appealType.replace(/_/g, " ")}
-                              </Badge>
-                              <StatusBadge status={appeal.status} type="denial" />
-                            </div>
-                            <p className="text-sm mt-1">
-                              Level {appeal.appealLevel} appeal {appeal.status}
-                            </p>
-                            <p className="text-xs text-muted-foreground mt-1">
-                              {formatDateTime(appeal.createdAt)} • System
-                            </p>
-                          </div>
-                        </div>
-                      ))
-                    )}
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <DenialHistoryTab denial={denial} appeals={existingAppeals} />
           </TabsContent>
         </Tabs>
       </div>
@@ -798,20 +450,62 @@ function DenialDetailPage() {
       />
 
       {/* Hold Call Dialog */}
-      {"payer" in denial && denial.payer && denial.claim && (
+      {payer && denial.claim && (
         <StartHoldCallDialog
           open={showCallDialog}
           onOpenChange={setShowCallDialog}
           organizationId={denial.claim.organizationId}
-          payerId={denial.payer._id}
-          payerName={denial.payer.name}
-          payerPhone={denial.payer.providerServicesPhone}
+          payerId={payer._id}
+          payerName={payer.name}
+          payerPhone={payer.providerServicesPhone}
           claimId={denial.claim._id}
           claimNumber={denial.claim.claimNumber}
           denialId={denial._id}
           denialCode={denial.denialCode}
         />
       )}
+
+      {/* Record Outcome Dialog */}
+      <RecordOutcomeDialog
+        open={showOutcomeDialog}
+        onOpenChange={setShowOutcomeDialog}
+        appealLevel={
+          selectedAppealId
+            ? existingAppeals.find((a) => a._id === selectedAppealId)?.appealLevel || 1
+            : 1
+        }
+        onRecordOutcome={handleRecordOutcome}
+      />
+
+      {/* View Appeal Letter Dialog */}
+      <Dialog
+        open={viewLetterDialog.open}
+        onOpenChange={(open) => setViewLetterDialog({ ...viewLetterDialog, open })}
+      >
+        <DialogContent className="max-w-2xl max-h-[80vh]">
+          <DialogHeader>
+            <DialogTitle>Appeal Letter</DialogTitle>
+          </DialogHeader>
+          <div className="overflow-y-auto max-h-[60vh]">
+            <pre className="whitespace-pre-wrap font-mono text-sm bg-muted p-4 rounded-lg">
+              {viewLetterDialog.letter}
+            </pre>
+          </div>
+          <DialogFooter>
+            <Button
+              variant="outline"
+              onClick={() => navigator.clipboard.writeText(viewLetterDialog.letter)}
+              className="gap-2"
+            >
+              <Copy className="w-4 h-4" />
+              Copy to Clipboard
+            </Button>
+            <Button onClick={() => setViewLetterDialog({ open: false, letter: "" })}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

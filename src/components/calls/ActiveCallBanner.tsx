@@ -147,7 +147,7 @@ export function ActiveCallBanner({ callId, onClose }: ActiveCallBannerProps) {
     >
       <CardContent className="p-4">
         <div className="flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3 min-w-0">
+          <div className="flex items-center gap-3 shrink-0">
             <div
               className={`w-10 h-10 rounded-full flex items-center justify-center shrink-0 ${
                 isOperatorReady
@@ -159,18 +159,18 @@ export function ActiveCallBanner({ callId, onClose }: ActiveCallBannerProps) {
             >
               {getStatusIcon()}
             </div>
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <p className="font-medium truncate">{getStatusText()}</p>
+            <div className="shrink-0">
+              <div className="flex items-center gap-2 flex-nowrap">
+                <p className="font-medium whitespace-nowrap">{getStatusText()}</p>
                 <CallStatusBadge status={call.status} />
                 {isRealCall && (
-                  <Badge variant="outline" className="text-warning border-warning gap-1">
+                  <Badge variant="outline" className="text-warning border-warning gap-1 whitespace-nowrap">
                     <Zap className="w-3 h-3" />
                     Live
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-muted-foreground truncate">
+              <p className="text-sm text-muted-foreground whitespace-nowrap">
                 {call.claim
                   ? `Claim ${call.claim.claimNumber}`
                   : call.payer?.name || "Insurance call"}
@@ -188,18 +188,19 @@ export function ActiveCallBanner({ callId, onClose }: ActiveCallBannerProps) {
               </div>
             )}
 
-            {isOperatorReady && (
+            {(isOperatorReady || isOnHold) && (
               <Button
                 onClick={handleConnect}
                 disabled={isConnecting}
-                className="gap-2 bg-success hover:bg-success/90"
+                className={`gap-2 ${isOperatorReady ? "bg-success hover:bg-success/90" : ""}`}
+                variant={isOperatorReady ? "default" : "outline"}
               >
                 {isConnecting ? (
                   <Loader2 className="w-4 h-4 animate-spin" />
                 ) : (
                   <CheckCircle className="w-4 h-4" />
                 )}
-                Connect Now
+                {isOperatorReady ? "Connect Now" : "Connect"}
               </Button>
             )}
 
@@ -246,7 +247,7 @@ export function GlobalCallBanner({ organizationId }: GlobalCallBannerProps) {
   const activeCall = activeCalls[0]
 
   return (
-    <div className="fixed bottom-4 right-4 z-50 w-96 max-w-[calc(100vw-2rem)]">
+    <div className="fixed bottom-4 right-4 z-50 w-auto max-w-[calc(100vw-2rem)]">
       <ActiveCallBanner callId={activeCall._id} />
     </div>
   )

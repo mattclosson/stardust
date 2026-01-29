@@ -11,10 +11,18 @@
 import { Route as rootRouteImport } from './routes/__root'
 import { Route as TasksRouteImport } from './routes/tasks'
 import { Route as SignupRouteImport } from './routes/signup'
+import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as LoginRouteImport } from './routes/login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as SettingsIndexRouteImport } from './routes/settings/index'
 import { Route as DenialsIndexRouteImport } from './routes/denials/index'
 import { Route as ClaimsIndexRouteImport } from './routes/claims/index'
+import { Route as SettingsTeamRouteImport } from './routes/settings/team'
+import { Route as SettingsSecurityRouteImport } from './routes/settings/security'
+import { Route as SettingsOrganizationsRouteImport } from './routes/settings/organizations'
+import { Route as SettingsNotificationsRouteImport } from './routes/settings/notifications'
+import { Route as SettingsIntegrationsRouteImport } from './routes/settings/integrations'
+import { Route as InviteTokenRouteImport } from './routes/invite/$token'
 import { Route as DenialsDenialIdRouteImport } from './routes/denials/$denialId'
 import { Route as ClaimsClaimIdRouteImport } from './routes/claims/$claimId'
 import { Route as AdminSeedRouteImport } from './routes/admin/seed'
@@ -29,6 +37,11 @@ const SignupRoute = SignupRouteImport.update({
   path: '/signup',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsRoute = SettingsRouteImport.update({
+  id: '/settings',
+  path: '/settings',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const LoginRoute = LoginRouteImport.update({
   id: '/login',
   path: '/login',
@@ -39,6 +52,11 @@ const IndexRoute = IndexRouteImport.update({
   path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const SettingsIndexRoute = SettingsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => SettingsRoute,
+} as any)
 const DenialsIndexRoute = DenialsIndexRouteImport.update({
   id: '/denials/',
   path: '/denials/',
@@ -47,6 +65,36 @@ const DenialsIndexRoute = DenialsIndexRouteImport.update({
 const ClaimsIndexRoute = ClaimsIndexRouteImport.update({
   id: '/claims/',
   path: '/claims/',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const SettingsTeamRoute = SettingsTeamRouteImport.update({
+  id: '/team',
+  path: '/team',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsSecurityRoute = SettingsSecurityRouteImport.update({
+  id: '/security',
+  path: '/security',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsOrganizationsRoute = SettingsOrganizationsRouteImport.update({
+  id: '/organizations',
+  path: '/organizations',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsNotificationsRoute = SettingsNotificationsRouteImport.update({
+  id: '/notifications',
+  path: '/notifications',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const SettingsIntegrationsRoute = SettingsIntegrationsRouteImport.update({
+  id: '/integrations',
+  path: '/integrations',
+  getParentRoute: () => SettingsRoute,
+} as any)
+const InviteTokenRoute = InviteTokenRouteImport.update({
+  id: '/invite/$token',
+  path: '/invite/$token',
   getParentRoute: () => rootRouteImport,
 } as any)
 const DenialsDenialIdRoute = DenialsDenialIdRouteImport.update({
@@ -68,13 +116,21 @@ const AdminSeedRoute = AdminSeedRouteImport.update({
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/signup': typeof SignupRoute
   '/tasks': typeof TasksRoute
   '/admin/seed': typeof AdminSeedRoute
   '/claims/$claimId': typeof ClaimsClaimIdRoute
   '/denials/$denialId': typeof DenialsDenialIdRoute
+  '/invite/$token': typeof InviteTokenRoute
+  '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/organizations': typeof SettingsOrganizationsRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/settings/team': typeof SettingsTeamRoute
   '/claims/': typeof ClaimsIndexRoute
   '/denials/': typeof DenialsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -84,33 +140,56 @@ export interface FileRoutesByTo {
   '/admin/seed': typeof AdminSeedRoute
   '/claims/$claimId': typeof ClaimsClaimIdRoute
   '/denials/$denialId': typeof DenialsDenialIdRoute
+  '/invite/$token': typeof InviteTokenRoute
+  '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/organizations': typeof SettingsOrganizationsRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/settings/team': typeof SettingsTeamRoute
   '/claims': typeof ClaimsIndexRoute
   '/denials': typeof DenialsIndexRoute
+  '/settings': typeof SettingsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/login': typeof LoginRoute
+  '/settings': typeof SettingsRouteWithChildren
   '/signup': typeof SignupRoute
   '/tasks': typeof TasksRoute
   '/admin/seed': typeof AdminSeedRoute
   '/claims/$claimId': typeof ClaimsClaimIdRoute
   '/denials/$denialId': typeof DenialsDenialIdRoute
+  '/invite/$token': typeof InviteTokenRoute
+  '/settings/integrations': typeof SettingsIntegrationsRoute
+  '/settings/notifications': typeof SettingsNotificationsRoute
+  '/settings/organizations': typeof SettingsOrganizationsRoute
+  '/settings/security': typeof SettingsSecurityRoute
+  '/settings/team': typeof SettingsTeamRoute
   '/claims/': typeof ClaimsIndexRoute
   '/denials/': typeof DenialsIndexRoute
+  '/settings/': typeof SettingsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
     | '/'
     | '/login'
+    | '/settings'
     | '/signup'
     | '/tasks'
     | '/admin/seed'
     | '/claims/$claimId'
     | '/denials/$denialId'
+    | '/invite/$token'
+    | '/settings/integrations'
+    | '/settings/notifications'
+    | '/settings/organizations'
+    | '/settings/security'
+    | '/settings/team'
     | '/claims/'
     | '/denials/'
+    | '/settings/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -120,29 +199,46 @@ export interface FileRouteTypes {
     | '/admin/seed'
     | '/claims/$claimId'
     | '/denials/$denialId'
+    | '/invite/$token'
+    | '/settings/integrations'
+    | '/settings/notifications'
+    | '/settings/organizations'
+    | '/settings/security'
+    | '/settings/team'
     | '/claims'
     | '/denials'
+    | '/settings'
   id:
     | '__root__'
     | '/'
     | '/login'
+    | '/settings'
     | '/signup'
     | '/tasks'
     | '/admin/seed'
     | '/claims/$claimId'
     | '/denials/$denialId'
+    | '/invite/$token'
+    | '/settings/integrations'
+    | '/settings/notifications'
+    | '/settings/organizations'
+    | '/settings/security'
+    | '/settings/team'
     | '/claims/'
     | '/denials/'
+    | '/settings/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   LoginRoute: typeof LoginRoute
+  SettingsRoute: typeof SettingsRouteWithChildren
   SignupRoute: typeof SignupRoute
   TasksRoute: typeof TasksRoute
   AdminSeedRoute: typeof AdminSeedRoute
   ClaimsClaimIdRoute: typeof ClaimsClaimIdRoute
   DenialsDenialIdRoute: typeof DenialsDenialIdRoute
+  InviteTokenRoute: typeof InviteTokenRoute
   ClaimsIndexRoute: typeof ClaimsIndexRoute
   DenialsIndexRoute: typeof DenialsIndexRoute
 }
@@ -163,6 +259,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof SignupRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings': {
+      id: '/settings'
+      path: '/settings'
+      fullPath: '/settings'
+      preLoaderRoute: typeof SettingsRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/login': {
       id: '/login'
       path: '/login'
@@ -177,6 +280,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/settings/': {
+      id: '/settings/'
+      path: '/'
+      fullPath: '/settings/'
+      preLoaderRoute: typeof SettingsIndexRouteImport
+      parentRoute: typeof SettingsRoute
+    }
     '/denials/': {
       id: '/denials/'
       path: '/denials'
@@ -189,6 +299,48 @@ declare module '@tanstack/react-router' {
       path: '/claims'
       fullPath: '/claims/'
       preLoaderRoute: typeof ClaimsIndexRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/settings/team': {
+      id: '/settings/team'
+      path: '/team'
+      fullPath: '/settings/team'
+      preLoaderRoute: typeof SettingsTeamRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/security': {
+      id: '/settings/security'
+      path: '/security'
+      fullPath: '/settings/security'
+      preLoaderRoute: typeof SettingsSecurityRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/organizations': {
+      id: '/settings/organizations'
+      path: '/organizations'
+      fullPath: '/settings/organizations'
+      preLoaderRoute: typeof SettingsOrganizationsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/notifications': {
+      id: '/settings/notifications'
+      path: '/notifications'
+      fullPath: '/settings/notifications'
+      preLoaderRoute: typeof SettingsNotificationsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/settings/integrations': {
+      id: '/settings/integrations'
+      path: '/integrations'
+      fullPath: '/settings/integrations'
+      preLoaderRoute: typeof SettingsIntegrationsRouteImport
+      parentRoute: typeof SettingsRoute
+    }
+    '/invite/$token': {
+      id: '/invite/$token'
+      path: '/invite/$token'
+      fullPath: '/invite/$token'
+      preLoaderRoute: typeof InviteTokenRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/denials/$denialId': {
@@ -215,14 +367,38 @@ declare module '@tanstack/react-router' {
   }
 }
 
+interface SettingsRouteChildren {
+  SettingsIntegrationsRoute: typeof SettingsIntegrationsRoute
+  SettingsNotificationsRoute: typeof SettingsNotificationsRoute
+  SettingsOrganizationsRoute: typeof SettingsOrganizationsRoute
+  SettingsSecurityRoute: typeof SettingsSecurityRoute
+  SettingsTeamRoute: typeof SettingsTeamRoute
+  SettingsIndexRoute: typeof SettingsIndexRoute
+}
+
+const SettingsRouteChildren: SettingsRouteChildren = {
+  SettingsIntegrationsRoute: SettingsIntegrationsRoute,
+  SettingsNotificationsRoute: SettingsNotificationsRoute,
+  SettingsOrganizationsRoute: SettingsOrganizationsRoute,
+  SettingsSecurityRoute: SettingsSecurityRoute,
+  SettingsTeamRoute: SettingsTeamRoute,
+  SettingsIndexRoute: SettingsIndexRoute,
+}
+
+const SettingsRouteWithChildren = SettingsRoute._addFileChildren(
+  SettingsRouteChildren,
+)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   LoginRoute: LoginRoute,
+  SettingsRoute: SettingsRouteWithChildren,
   SignupRoute: SignupRoute,
   TasksRoute: TasksRoute,
   AdminSeedRoute: AdminSeedRoute,
   ClaimsClaimIdRoute: ClaimsClaimIdRoute,
   DenialsDenialIdRoute: DenialsDenialIdRoute,
+  InviteTokenRoute: InviteTokenRoute,
   ClaimsIndexRoute: ClaimsIndexRoute,
   DenialsIndexRoute: DenialsIndexRoute,
 }

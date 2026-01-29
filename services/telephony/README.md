@@ -1,11 +1,11 @@
 # Stardust Telephony Service
 
-Real-time phone calling service for the "Hold for Me" feature. Uses Twilio for outbound calls, Deepgram for speech-to-text, and OpenAI for operator detection.
+Real-time phone calling service for the "Hold for Me" feature. Uses SignalWire for outbound calls, Deepgram for speech-to-text, and OpenAI for operator detection.
 
 ## Architecture
 
 ```
-Convex Dashboard → This Service → Twilio → Insurance Company
+Convex Dashboard → This Service → SignalWire → Insurance Company
                         ↓
                    Deepgram STT
                         ↓
@@ -20,8 +20,9 @@ Convex Dashboard → This Service → Twilio → Insurance Company
 
 ### Prerequisites
 
-1. **Twilio Account**: Sign up at https://twilio.com
-   - Get Account SID and Auth Token
+1. **SignalWire Account**: Sign up at https://signalwire.com
+   - Create a project and get Project ID + API Token
+   - Note your Space URL (e.g., `your-space.signalwire.com`)
    - Purchase a phone number (~$1/month)
 
 2. **Deepgram Account**: Sign up at https://deepgram.com
@@ -35,10 +36,11 @@ Convex Dashboard → This Service → Twilio → Insurance Company
 Copy `.env.example` to `.env` and fill in:
 
 ```bash
-# Twilio
-TWILIO_ACCOUNT_SID=AC...
-TWILIO_AUTH_TOKEN=...
-TWILIO_PHONE_NUMBER=+1234567890
+# SignalWire
+SIGNALWIRE_PROJECT_ID=your-project-id
+SIGNALWIRE_API_TOKEN=your-api-token
+SIGNALWIRE_SPACE_URL=your-space.signalwire.com
+SIGNALWIRE_PHONE_NUMBER=+1234567890
 
 # Deepgram
 DEEPGRAM_API_KEY=...
@@ -107,7 +109,7 @@ Railway will automatically:
 
 ## API Endpoints
 
-### `POST /twilio/call`
+### `POST /signalwire/call`
 Initiates an outbound call.
 
 ```json
@@ -119,22 +121,22 @@ Initiates an outbound call.
 }
 ```
 
-### `POST /twilio/bridge`
+### `POST /signalwire/bridge`
 Bridges the call to the user's phone.
 
 ```json
 {
-  "callSid": "CA...",
+  "callSid": "...",
   "userPhoneNumber": "+15551234567"
 }
 ```
 
-### `POST /twilio/hangup`
+### `POST /signalwire/hangup`
 Ends a call.
 
 ```json
 {
-  "callSid": "CA..."
+  "callSid": "..."
 }
 ```
 
@@ -143,7 +145,7 @@ Health check endpoint.
 
 ## WebSocket
 
-The `/media-stream` WebSocket endpoint receives audio from Twilio:
+The `/media-stream` WebSocket endpoint receives audio from SignalWire:
 
 - Receives mulaw audio at 8kHz
 - Streams to Deepgram for real-time transcription

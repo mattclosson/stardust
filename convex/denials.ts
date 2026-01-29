@@ -1,5 +1,6 @@
 import { query, mutation } from "./_generated/server"
 import { v } from "convex/values"
+import { enrichDenialWithClaimAndPatient } from "./utils/enrichment"
 
 // List denials with filtering
 export const list = query({
@@ -32,47 +33,18 @@ export const list = query({
       denials = await ctx.db.query("denials").order("desc").take(limit * 2)
     }
 
-    // Enrich denials with claim and patient data
+    // Enrich denials with claim and patient data using shared utility
     const enrichedDenials = await Promise.all(
       denials.map(async (denial) => {
-        const claim = await ctx.db.get(denial.claimId)
-        if (!claim) return null
+        const enriched = await enrichDenialWithClaimAndPatient(ctx, denial, { includeClaimOrg: true })
+        if (!enriched) return null
 
         // Filter by organization if specified
-        if (args.organizationId && claim.organizationId !== args.organizationId) {
+        if (args.organizationId && enriched.claim?.organizationId !== args.organizationId) {
           return null
         }
 
-        const patient = await ctx.db.get(claim.patientId)
-        const coverage = await ctx.db.get(claim.coverageId)
-        const payer = coverage ? await ctx.db.get(coverage.payerId) : null
-
-        return {
-          ...denial,
-          claim: {
-            _id: claim._id,
-            claimNumber: claim.claimNumber,
-            dateOfService: claim.dateOfService,
-            totalCharges: claim.totalCharges,
-            status: claim.status,
-            organizationId: claim.organizationId,
-          },
-          patient: patient
-            ? {
-                _id: patient._id,
-                firstName: patient.firstName,
-                lastName: patient.lastName,
-                mrn: patient.mrn,
-              }
-            : null,
-          payer: payer
-            ? {
-                _id: payer._id,
-                name: payer.name,
-                payerType: payer.payerType,
-              }
-            : null,
-        }
+        return enriched
       })
     )
 

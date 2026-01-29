@@ -353,7 +353,7 @@ export const startRealCall = action({
 
     // Call the telephony service to initiate the real call
     // Include IVR navigation context
-    const response: Response = await fetch(`${telephonyServiceUrl}/twilio/call`, {
+    const response: Response = await fetch(`${telephonyServiceUrl}/signalwire/call`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
@@ -485,7 +485,7 @@ export const bridgeCall = action({
       throw new Error("TELEPHONY_SERVICE_URL not configured")
     }
 
-    const response: Response = await fetch(`${telephonyServiceUrl}/twilio/bridge`, {
+    const response: Response = await fetch(`${telephonyServiceUrl}/signalwire/bridge`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",

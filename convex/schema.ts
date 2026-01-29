@@ -46,6 +46,16 @@ export default defineSchema({
     ),
     invitedAt: v.optional(v.number()),
     joinedAt: v.optional(v.number()),
+    // Notification preferences
+    notificationPreferences: v.optional(v.object({
+      emailNotifications: v.boolean(),
+      taskAssignments: v.boolean(),
+      taskDueDates: v.boolean(),
+      claimStatusChanges: v.boolean(),
+      denialAlerts: v.boolean(),
+      appealDeadlines: v.boolean(),
+      teamUpdates: v.boolean(),
+    })),
     createdAt: v.number(),
   })
     .index("by_userId", ["userId"])
@@ -65,6 +75,35 @@ export default defineSchema({
   })
     .index("by_rcmUser", ["rcmUserId"])
     .index("by_organization", ["organizationId"]),
+
+  // Invite links for adding team members
+  invites: defineTable({
+    rcmCompanyId: v.id("rcmCompanies"),
+    email: v.optional(v.string()), // Optional: pre-fill for specific invitee
+    role: v.union(
+      v.literal("admin"),
+      v.literal("supervisor"),
+      v.literal("billing_specialist"),
+      v.literal("coder"),
+      v.literal("appeals_specialist"),
+      v.literal("viewer")
+    ),
+    token: v.string(), // Unique invite token
+    status: v.union(
+      v.literal("pending"),
+      v.literal("accepted"),
+      v.literal("expired"),
+      v.literal("revoked")
+    ),
+    createdBy: v.string(), // userId of the person who created the invite
+    expiresAt: v.number(),
+    acceptedBy: v.optional(v.string()), // userId of who accepted
+    acceptedAt: v.optional(v.number()),
+    createdAt: v.number(),
+  })
+    .index("by_token", ["token"])
+    .index("by_rcmCompany", ["rcmCompanyId"])
+    .index("by_status", ["rcmCompanyId", "status"]),
 
   // ============================================
   // HEALTHCARE ORGANIZATIONS
@@ -150,10 +189,23 @@ export default defineSchema({
     }),
     phone: v.optional(v.string()),
     email: v.optional(v.string()),
+    // External system tracking (for Redox, direct EHR integrations)
+    externalId: v.optional(v.string()),
+    externalSource: v.optional(v.union(
+      v.literal("redox"),
+      v.literal("nextgen"),
+      v.literal("epic"),
+      v.literal("cerner"),
+      v.literal("athena"),
+      v.literal("eclinicalworks"),
+      v.literal("manual")
+    )),
+    lastSyncedAt: v.optional(v.number()),
     createdAt: v.number(),
   })
     .index("by_organization", ["organizationId"])
     .index("by_mrn", ["organizationId", "mrn"])
+    .index("by_externalId", ["organizationId", "externalSource", "externalId"])
     // Search index for patient name lookups
     .searchIndex("search_name", {
       searchField: "lastName",
@@ -281,6 +333,19 @@ export default defineSchema({
     // AI-powered denial risk prediction
     denialRisk: v.optional(v.number()),
     denialRiskFactors: v.optional(v.array(v.string())),
+    // External system tracking (for Redox, direct EHR integrations)
+    externalEncounterId: v.optional(v.string()),
+    externalSource: v.optional(v.union(
+      v.literal("redox"),
+      v.literal("nextgen"),
+      v.literal("epic"),
+      v.literal("cerner"),
+      v.literal("athena"),
+      v.literal("eclinicalworks"),
+      v.literal("import"),
+      v.literal("manual")
+    )),
+    lastSyncedAt: v.optional(v.number()),
     createdAt: v.number(),
     updatedAt: v.number(),
   })
@@ -289,6 +354,7 @@ export default defineSchema({
     .index("by_status", ["organizationId", "status"])
     .index("by_dateOfService", ["organizationId", "dateOfService"])
     .index("by_claimNumber", ["claimNumber"])
+    .index("by_externalEncounterId", ["organizationId", "externalSource", "externalEncounterId"])
     // Search index for claim number lookups
     .searchIndex("search_claimNumber", {
       searchField: "claimNumber",
@@ -597,6 +663,76 @@ export default defineSchema({
     .index("by_organization", ["organizationId"])
     .index("by_claim", ["claimId"])
     .index("by_patient", ["patientId"]),
+
+  // External system integrations (Redox, direct EHR APIs)
+  integrations: defineTable({
+    organizationId: v.id("organizations"),
+    integrationType: v.union(
+      v.literal("redox"),
+      v.literal("nextgen"),
+      v.literal("epic"),
+      v.literal("cerner"),
+      v.literal("athena"),
+      v.literal("eclinicalworks")
+    ),
+    // Display name for this integration
+    name: v.string(),
+    // Integration-specific configuration
+    config: v.object({
+      // Redox-specific
+      sourceId: v.optional(v.string()),
+      destinationId: v.optional(v.string()),
+      // Direct EHR-specific
+      practiceId: v.optional(v.string()),
+      apiUrl: v.optional(v.string()),
+    }),
+    // Webhook verification
+    webhookSecret: v.optional(v.string()),
+    // Status tracking
+    isActive: v.boolean(),
+    lastSyncAt: v.optional(v.number()),
+    lastSyncStatus: v.optional(v.union(
+      v.literal("success"),
+      v.literal("error"),
+      v.literal("partial")
+    )),
+    lastSyncError: v.optional(v.string()),
+    // Counters
+    totalSynced: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_organization", ["organizationId"])
+    .index("by_type", ["organizationId", "integrationType"]),
+
+  // Sync logs for debugging and auditing
+  integrationSyncLogs: defineTable({
+    integrationId: v.id("integrations"),
+    organizationId: v.id("organizations"),
+    eventType: v.string(), // e.g., "Financial.Transaction", "PatientAdmin.NewPatient"
+    externalId: v.optional(v.string()),
+    status: v.union(
+      v.literal("success"),
+      v.literal("error"),
+      v.literal("skipped")
+    ),
+    // What was created/updated
+    entityType: v.optional(v.union(
+      v.literal("patient"),
+      v.literal("claim"),
+      v.literal("coverage"),
+      v.literal("provider")
+    )),
+    entityId: v.optional(v.string()),
+    // Error details if failed
+    errorMessage: v.optional(v.string()),
+    // Raw payload for debugging (truncated)
+    payloadPreview: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_integration", ["integrationId"])
+    .index("by_organization", ["organizationId"])
+    .index("by_status", ["integrationId", "status"]),
 
   // Hold-for-me calling feature
   holdCalls: defineTable({

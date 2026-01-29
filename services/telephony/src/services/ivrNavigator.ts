@@ -16,6 +16,7 @@ export interface IvrAction {
   type: IvrActionType;
   value?: string;
   reason: string;
+  confidence?: number;
 }
 
 export interface CallContext {
@@ -51,6 +52,7 @@ export class IvrNavigator {
   private lastActionTime = 0;
   private operatorDetected = false;
   private isOnHold = false;
+  private isPaused = false; // Pause analysis during DTMF sending
   private actionHistory: IvrAction[] = [];
 
   // Configuration
@@ -58,6 +60,7 @@ export class IvrNavigator {
   private readonly ANALYSIS_INTERVAL_MS = 3000; // Analyze every 3 seconds (faster than operator detection)
   private readonly MIN_TEXT_LENGTH = 10;
   private readonly ACTION_COOLDOWN_MS = 2000; // Wait 2 seconds between actions
+  private readonly OPERATOR_CONFIDENCE_THRESHOLD = 0.85; // High bar for operator detection
 
   constructor(
     context: CallContext,
@@ -123,7 +126,8 @@ export class IvrNavigator {
    * Analyze transcription and take action if needed
    */
   private async analyzeAndAct(): Promise<void> {
-    if (this.operatorDetected || !this.openai) {
+    // Skip if paused (during DTMF sending), operator detected, or no client
+    if (this.isPaused || this.operatorDetected || !this.openai) {
       return;
     }
 
@@ -148,10 +152,18 @@ export class IvrNavigator {
       console.log(`[IvrNavigator] Action decided: ${JSON.stringify(action)}`);
 
       if (action.type === "operator_detected") {
-        this.operatorDetected = true;
-        this.stopAnalysisLoop();
-        await this.onOperatorDetected();
-        return;
+        // Require high confidence for operator detection to avoid false positives
+        const confidence = action.confidence ?? 0;
+        if (confidence >= this.OPERATOR_CONFIDENCE_THRESHOLD) {
+          console.log(`[IvrNavigator] Operator detected with confidence ${confidence}`);
+          this.operatorDetected = true;
+          this.stopAnalysisLoop();
+          await this.onOperatorDetected();
+          return;
+        } else {
+          console.log(`[IvrNavigator] Operator detection rejected - confidence ${confidence} < ${this.OPERATOR_CONFIDENCE_THRESHOLD}`);
+          // Continue listening, don't trigger operator detection yet
+        }
       }
 
       if (action.type === "on_hold" && !this.isOnHold) {
@@ -184,6 +196,8 @@ export class IvrNavigator {
       case "press_digit":
         if (action.value) {
           console.log(`[IvrNavigator] Pressing digit: ${action.value}`);
+          // Clear buffer before DTMF - prevents re-triggering same action
+          this.clearTranscriptionBuffer();
           await this.onSendDtmf(action.value);
         }
         break;
@@ -191,6 +205,8 @@ export class IvrNavigator {
       case "enter_npi":
         if (this.context.organizationNpi) {
           console.log(`[IvrNavigator] Entering NPI: ${this.context.organizationNpi}`);
+          // Clear buffer before DTMF - prevents re-triggering same action
+          this.clearTranscriptionBuffer();
           // Add # at the end as most systems expect it
           await this.onSendDtmf(this.context.organizationNpi + "#");
         } else {
@@ -203,6 +219,8 @@ export class IvrNavigator {
           // Strip non-numeric characters for DTMF
           const numericMemberId = this.context.memberId.replace(/\D/g, "");
           console.log(`[IvrNavigator] Entering member ID: ${numericMemberId}`);
+          // Clear buffer before DTMF - prevents re-triggering same action
+          this.clearTranscriptionBuffer();
           await this.onSendDtmf(numericMemberId + "#");
         } else {
           console.warn("[IvrNavigator] No member ID configured, cannot enter");
@@ -213,6 +231,8 @@ export class IvrNavigator {
         if (this.context.claimNumber) {
           const numericClaim = this.context.claimNumber.replace(/\D/g, "");
           console.log(`[IvrNavigator] Entering claim number: ${numericClaim}`);
+          // Clear buffer before DTMF - prevents re-triggering same action
+          this.clearTranscriptionBuffer();
           await this.onSendDtmf(numericClaim + "#");
         } else {
           console.warn("[IvrNavigator] No claim number configured, cannot enter");
@@ -223,6 +243,14 @@ export class IvrNavigator {
         console.log(`[IvrNavigator] Waiting: ${action.reason}`);
         break;
     }
+  }
+
+  /**
+   * Clear the transcription buffer (called after taking an action)
+   */
+  private clearTranscriptionBuffer(): void {
+    this.transcriptionBuffer = [];
+    console.log(`[IvrNavigator] Transcription buffer cleared`);
   }
 
   /**
@@ -256,24 +284,40 @@ ${this.actionHistory.slice(-5).map(a => `- ${a.type}: ${a.reason}`).join("\n") |
 YOUR TASK:
 Analyze the IVR transcription and decide the SINGLE best action to take.
 
-IMPORTANT RULES:
-1. If you hear a HUMAN OPERATOR (personal greeting, asking how they can help, natural conversation), return operator_detected
-2. If you hear hold music, "please hold", "estimated wait time", return on_hold
-3. If asked for NPI or provider identifier, return enter_npi
-4. If asked for member ID, subscriber number, or patient ID, return enter_member_id
-5. If asked for claim number or reference number, return enter_claim_number
-6. If you hear a menu with options, choose the option that best matches our purpose:
-   - For claims_status: prefer "claims", "claim status", "billing"
-   - For eligibility: prefer "eligibility", "benefits", "verification"
-   - For prior_auth: prefer "prior authorization", "pre-certification"
+CRITICAL RULES FOR OPERATOR DETECTION:
+A HUMAN OPERATOR must meet ALL of these criteria:
+1. INTRODUCES THEMSELVES BY NAME (e.g., "This is Michael", "My name is Sarah")
+2. ASKS AN OPEN-ENDED QUESTION (e.g., "How can I help you today?", "What can I do for you?")
+3. Uses NATURAL conversational speech, not scripted prompts
+
+DO NOT return operator_detected for:
+- Automated confirmations like "Thank you", "I found your record", "Your information has been verified"
+- System acknowledgments after data entry
+- Pre-recorded messages that sound personalized
+- Any prompt that asks you to enter digits or information
+- Hold messages or queue position updates
+
+IVR NAVIGATION RULES (in priority order):
+1. DATA ENTRY (highest priority - if asked to enter data, do NOT press menu digits):
+   - NPI: Look for "NPI", "national provider identifier", "national provider ID", "provider ID", "10 digit provider", "provider number". Return enter_npi.
+   - Member ID: Look for "member ID", "member number", "subscriber ID", "subscriber number", "patient ID", "ID from insurance card". Return enter_member_id.
+   - Claim number: Look for "claim number", "reference number", "claim ID". Return enter_claim_number.
+
+2. HOLD STATUS: If you hear hold music, "please hold", "please wait", "estimated wait time", "your call will be answered", return on_hold
+
+3. MENU NAVIGATION (only if NOT asked for data entry):
+   - For claims_status: prefer "claims", "claim status", "billing" - typically press 1
+   - For eligibility: prefer "eligibility", "benefits", "verification" - typically press 2
+   - For prior_auth: prefer "prior authorization", "pre-certification" - typically press 3
    - For appeal: prefer "appeals", "grievances", "disputes"
    - To speak to representative: typically 0 or 9
-7. If the prompt is incomplete or unclear, return wait
-8. NEVER enter information we don't have
-9. Prefer lower menu numbers when multiple options match
+
+4. If the prompt is incomplete, being cut off, or unclear, return wait
+5. NEVER enter information we don't have (check the "Have NPI/Member ID/Claim Number" context above)
+6. If you already took an action for a prompt (check RECENT ACTIONS), wait for new IVR prompt before acting again
 
 Respond with JSON only:
-{"type": "press_digit" | "enter_npi" | "enter_member_id" | "enter_claim_number" | "wait" | "on_hold" | "operator_detected", "value": "digit(s) to press if applicable", "reason": "brief explanation"}`;
+{"type": "press_digit" | "enter_npi" | "enter_member_id" | "enter_claim_number" | "wait" | "on_hold" | "operator_detected", "value": "digit(s) to press if applicable", "confidence": number 0-1 (REQUIRED for operator_detected), "reason": "brief explanation"}`;
 
     const response = await this.openai.chat.completions.create({
       model: "gpt-4o-mini",
@@ -297,6 +341,7 @@ Respond with JSON only:
         type: result.type || "wait",
         value: result.value,
         reason: result.reason || "Unknown",
+        confidence: typeof result.confidence === "number" ? result.confidence : undefined,
       };
     } catch {
       console.error("[IvrNavigator] Failed to parse response:", content);
@@ -319,6 +364,22 @@ Respond with JSON only:
    */
   isOperatorDetectedStatus(): boolean {
     return this.operatorDetected;
+  }
+
+  /**
+   * Pause analysis (called when sending DTMF - stream will disconnect)
+   */
+  pause(): void {
+    this.isPaused = true;
+    console.log(`[IvrNavigator] Analysis paused`);
+  }
+
+  /**
+   * Resume analysis (called when stream reconnects after DTMF)
+   */
+  resume(): void {
+    this.isPaused = false;
+    console.log(`[IvrNavigator] Analysis resumed`);
   }
 
   /**
